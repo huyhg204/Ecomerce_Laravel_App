@@ -10,6 +10,25 @@ const Footer = () => {
     const [chatHistory, setChatHistory] = useState([])
     const [isLoading, setIsLoading] = useState(false)
 
+    // Danh sách prompt mẫu
+    const samplePrompts = [
+        'Gợi ý cho tôi vài bộ đồ thể thao',
+        'Tìm sản phẩm quần áo',
+        'Sản phẩm nào đang bán chạy?',
+        'Có những sản phẩm giày dép nào?',
+        'Tìm túi xách phù hợp',
+        'Gợi ý phụ kiện thời trang'
+    ]
+
+    const handlePromptClick = (prompt) => {
+        setChatMessage(prompt)
+        // Tự động focus vào input
+        setTimeout(() => {
+            const input = document.querySelector('input[type="text"]')
+            if (input) input.focus()
+        }, 100)
+    }
+
     const handleSendMessage = async (e) => {
         e.preventDefault()
         if (!chatMessage.trim()) return
@@ -25,16 +44,21 @@ const Footer = () => {
             })
 
             if (response.data.status === 'success') {
-                const botMessage = response.data.data?.response || response.data.data?.message || 'Xin chào! Tôi có thể giúp gì cho bạn?'
+                const botMessage = response.data.message || 'Xin chào! Tôi có thể giúp gì cho bạn?'
                 setChatHistory(prev => [...prev, { type: 'bot', message: botMessage }])
             } else {
-                setChatHistory(prev => [...prev, { type: 'bot', message: 'Xin lỗi, tôi không thể trả lời ngay bây giờ.' }])
+                const errorMessage = response.data.message || 'Xin lỗi, tôi không thể trả lời ngay bây giờ.'
+                setChatHistory(prev => [...prev, { type: 'bot', message: errorMessage }])
+                toast.error('Lỗi', {
+                    description: errorMessage
+                })
             }
         } catch (error) {
+            const errorMessage = error.response?.data?.message || error.message || 'Vui lòng thử lại sau.'
             toast.error('Không thể gửi tin nhắn', {
-                description: 'Vui lòng thử lại sau.'
+                description: errorMessage
             })
-            setChatHistory(prev => [...prev, { type: 'bot', message: 'Xin lỗi, đã xảy ra lỗi. Vui lòng thử lại sau.' }])
+            setChatHistory(prev => [...prev, { type: 'bot', message: `Xin lỗi, đã xảy ra lỗi: ${errorMessage}` }])
         } finally {
             setIsLoading(false)
         }
@@ -150,12 +174,68 @@ const Footer = () => {
                     }}>
                         {chatHistory.length === 0 ? (
                             <div style={{
-                                textAlign: 'center',
-                                color: '#666',
-                                fontSize: '1.4rem',
-                                padding: '20px'
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '15px',
+                                padding: '10px'
                             }}>
-                                <p>Xin chào! Tôi có thể giúp gì cho bạn?</p>
+                                <div style={{
+                                    textAlign: 'center',
+                                    color: '#666',
+                                    fontSize: '1.4rem',
+                                    marginBottom: '10px'
+                                }}>
+                                    <p style={{ margin: 0, fontWeight: 'bold', color: '#1976d2' }}>
+                                        Xin chào! Tôi có thể giúp gì cho bạn?
+                                    </p>
+                                    <p style={{ margin: '5px 0 0 0', fontSize: '1.2rem', color: '#999' }}>
+                                        Chọn một gợi ý bên dưới hoặc nhập câu hỏi của bạn
+                                    </p>
+                                </div>
+                                
+                                {/* Prompt mẫu */}
+                                <div style={{
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    gap: '8px'
+                                }}>
+                                    {samplePrompts.map((prompt, index) => (
+                                        <button
+                                            key={index}
+                                            onClick={() => handlePromptClick(prompt)}
+                                            disabled={isLoading}
+                                            style={{
+                                                padding: '10px 15px',
+                                                backgroundColor: '#fff',
+                                                border: '1px solid #e0e0e0',
+                                                borderRadius: '8px',
+                                                cursor: isLoading ? 'not-allowed' : 'pointer',
+                                                textAlign: 'left',
+                                                fontSize: '1.3rem',
+                                                color: '#333',
+                                                transition: 'all 0.2s',
+                                                opacity: isLoading ? 0.6 : 1,
+                                                boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+                                            }}
+                                            onMouseEnter={(e) => {
+                                                if (!isLoading) {
+                                                    e.target.style.backgroundColor = '#f0f7ff'
+                                                    e.target.style.borderColor = '#1976d2'
+                                                    e.target.style.transform = 'translateX(5px)'
+                                                }
+                                            }}
+                                            onMouseLeave={(e) => {
+                                                if (!isLoading) {
+                                                    e.target.style.backgroundColor = '#fff'
+                                                    e.target.style.borderColor = '#e0e0e0'
+                                                    e.target.style.transform = 'translateX(0)'
+                                                }
+                                            }}
+                                        >
+                                            💬 {prompt}
+                                        </button>
+                                    ))}
+                                </div>
                             </div>
                         ) : (
                             chatHistory.map((item, index) => (
@@ -187,7 +267,7 @@ const Footer = () => {
                                 borderRadius: '12px',
                                 fontSize: '1.4rem'
                             }}>
-                                Đang nhập...
+                                Đang tìm...
                             </div>
                         )}
                     </div>

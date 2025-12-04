@@ -134,12 +134,30 @@ class HomeController extends Controller
             return redirect()->route('home');
         }
 
+        // Lấy product attributes (size/color) nếu bảng đã tồn tại
+        $attributes = [];
+        try {
+            if (DB::getSchemaBuilder()->hasTable('product_attributes')) {
+                $attributes = DB::table('product_attributes')
+                    ->where('product_id', $id)
+                    ->get();
+            }
+        } catch (\Exception $e) {
+            // Bỏ qua nếu bảng chưa tồn tại
+        }
+
         if ($request->expectsJson()) {
-            return response()->json(['status' => 'success', 'data' => $product]);
+            return response()->json([
+                'status' => 'success', 
+                'data' => [
+                    'product' => $product,
+                    'attributes' => $attributes
+                ]
+            ]);
         }
 
         $CategoriesHeader=$this->CategoriesHeader;
-        return view('user.pages.product-detail',compact('CategoriesHeader','product'));
+        return view('user.pages.product-detail',compact('CategoriesHeader','product', 'attributes'));
     }
 
     public function showProductsByCategory($id, Request $request)

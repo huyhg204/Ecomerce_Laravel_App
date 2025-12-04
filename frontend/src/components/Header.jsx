@@ -6,40 +6,17 @@ import { Autoplay, Pagination } from 'swiper/modules'
 import 'swiper/css'
 import 'swiper/css/pagination'
 import { axiosInstance } from '../utils/axiosConfig'
-
-const heroSlides = [
-  {
-    id: 1,
-    badge: 'iPhone 15 Series',
-    title: 'Voucher giảm đến 10%',
-    description: 'Thiết bị cao cấp với chip A17 siêu nhanh cho mọi nhu cầu.',
-    image:
-      'https://images.unsplash.com/photo-1523475472560-d2df97ec485c?auto=format&fit=crop&w=900&q=80',
-  },
-  {
-    id: 2,
-    badge: 'Gaming Essentials',
-    title: 'Cảm nhận sức mạnh mới',
-    description: 'Máy console và phụ kiện dành riêng cho game thủ chuyên nghiệp.',
-    image:
-      'https://images.unsplash.com/photo-1605902711622-cfb43c4437b5?auto=format&fit=crop&w=900&q=80',
-  },
-  {
-    id: 3,
-    badge: 'Smart Living',
-    title: 'Thiết bị nhà thông minh',
-    description: 'Camera, loa và công cụ tự động hóa cho mọi không gian sống.',
-    image:
-      'https://images.unsplash.com/photo-1484704849700-f032a568e944?auto=format&fit=crop&w=900&q=80',
-  },
-]
+import { getImageUrl } from '../utils/imageHelper'
 
 const Header = () => {
   const [categories, setCategories] = useState([])
+  const [heroSlides, setHeroSlides] = useState([])
   const [loading, setLoading] = useState(true)
+  const [bannersLoading, setBannersLoading] = useState(true)
 
   useEffect(() => {
     fetchCategories()
+    fetchBanners()
   }, [])
 
   const fetchCategories = async () => {
@@ -60,6 +37,66 @@ const Header = () => {
       setCategories([])
     } finally {
       setLoading(false)
+    }
+  }
+
+  const fetchBanners = async () => {
+    try {
+      setBannersLoading(true)
+      const response = await axiosInstance.get('/banners', {
+        params: { position: 0 } // Lấy banner cho hero slider
+      })
+      
+      if (response.data.status === 'success') {
+        const bannersData = response.data.data || []
+        const bannersArray = Array.isArray(bannersData) ? bannersData : []
+        // Chỉ lấy banner đang hoạt động và có ảnh
+        const activeBanners = bannersArray
+          .filter(banner => banner.status === 1 && banner.image)
+          .map(banner => ({
+            id: banner.id,
+            badge: banner.badge || '',
+            title: banner.title || '',
+            description: banner.description || '',
+            image: getImageUrl(banner.image),
+            link: banner.link || '/collections/featured'
+          }))
+        
+        setHeroSlides(activeBanners.length > 0 ? activeBanners : [
+          // Fallback banner nếu không có banner nào
+          {
+            id: 1,
+            badge: 'iPhone 15 Series',
+            title: 'Voucher giảm đến 10%',
+            description: 'Thiết bị cao cấp với chip A17 siêu nhanh cho mọi nhu cầu.',
+            image: 'https://images.unsplash.com/photo-1523475472560-d2df97ec485c?auto=format&fit=crop&w=900&q=80',
+            link: '/collections/featured'
+          },
+        ])
+      } else {
+        // Fallback nếu API lỗi
+        setHeroSlides([{
+          id: 1,
+          badge: 'iPhone 15 Series',
+          title: 'Voucher giảm đến 10%',
+          description: 'Thiết bị cao cấp với chip A17 siêu nhanh cho mọi nhu cầu.',
+          image: 'https://images.unsplash.com/photo-1523475472560-d2df97ec485c?auto=format&fit=crop&w=900&q=80',
+          link: '/collections/featured'
+        }])
+      }
+    } catch (error) {
+      console.error('Lỗi khi lấy banner:', error)
+      // Fallback nếu API lỗi
+      setHeroSlides([{
+        id: 1,
+        badge: 'iPhone 15 Series',
+        title: 'Voucher giảm đến 10%',
+        description: 'Thiết bị cao cấp với chip A17 siêu nhanh cho mọi nhu cầu.',
+        image: 'https://images.unsplash.com/photo-1523475472560-d2df97ec485c?auto=format&fit=crop&w=900&q=80',
+        link: '/collections/featured'
+      }])
+    } finally {
+      setBannersLoading(false)
     }
   }
 
@@ -100,33 +137,46 @@ const Header = () => {
           )}
         </aside>
         <div className="hero_slider">
-          <Swiper
-            modules={[Pagination, Autoplay]}
-            pagination={{ clickable: true }}
-            autoplay={{ delay: 5000 }}
-            loop
-            className="hero_swiper"
-          >
-            {heroSlides.map((slide) => (
-              <SwiperSlide key={slide.id}>
-                <div className="hero_slide">
-                  <div className="hero_slide_content">
-                    <p className="hero_slide_badge">{slide.badge}</p>
-                    <h2 className="hero_slide_title">{slide.title}</h2>
-                    <p className="hero_slide_desc">{slide.description}</p>
-                    <Link to="/collections/featured" className="hero_cta">
-                      Mua ngay
-                    </Link>
+          {bannersLoading ? (
+            <div style={{ 
+              display: 'flex', 
+              justifyContent: 'center', 
+              alignItems: 'center',
+              minHeight: '400px'
+            }}>
+              <ClipLoader color="#1976d2" size={40} />
+            </div>
+          ) : heroSlides.length > 0 ? (
+            <Swiper
+              modules={[Pagination, Autoplay]}
+              pagination={{ clickable: true }}
+              autoplay={{ delay: 5000 }}
+              loop={heroSlides.length > 1}
+              className="hero_swiper"
+            >
+              {heroSlides.map((slide) => (
+                <SwiperSlide key={slide.id}>
+                  <div className="hero_slide">
+                    <div className="hero_slide_content">
+                      {slide.badge && <p className="hero_slide_badge">{slide.badge}</p>}
+                      {slide.title && <h2 className="hero_slide_title">{slide.title}</h2>}
+                      {slide.description && <p className="hero_slide_desc">{slide.description}</p>}
+                      <Link to={slide.link} className="hero_cta">
+                        Mua ngay
+                      </Link>
+                    </div>
+                    {slide.image && (
+                      <img
+                        src={slide.image}
+                        alt={slide.title || 'Banner'}
+                        className="hero_slide_img"
+                      />
+                    )}
                   </div>
-                  <img
-                    src={slide.image}
-                    alt={slide.title}
-                    className="hero_slide_img"
-                  />
-                </div>
-              </SwiperSlide>
-            ))}
-          </Swiper>
+                </SwiperSlide>
+              ))}
+            </Swiper>
+          ) : null}
         </div>
       </div>
     </header>

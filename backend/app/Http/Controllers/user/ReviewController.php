@@ -18,10 +18,14 @@ class ReviewController extends Controller
             $reviews = DB::table('reviews')
                 ->join('users', 'reviews.user_id', '=', 'users.id')
                 ->where('reviews.product_id', $productId)
+                ->where('reviews.status', 1) // Chỉ lấy đánh giá đang hiển thị
                 ->select(
                     'reviews.id',
                     'reviews.rating',
                     'reviews.content',
+                    'reviews.admin_reply',
+                    'reviews.status',
+                    'reviews.admin_replied_at',
                     'reviews.created_at',
                     'users.name as user_name',
                     'users.email as user_email'
@@ -29,9 +33,10 @@ class ReviewController extends Controller
                 ->orderBy('reviews.created_at', 'desc')
                 ->get();
 
-            // Tính toán rating trung bình
+            // Tính toán rating trung bình (chỉ tính đánh giá đang hiển thị)
             $avgRating = DB::table('reviews')
                 ->where('product_id', $productId)
+                ->where('status', 1)
                 ->avg('rating');
 
             $totalReviews = $reviews->count();
@@ -98,35 +103,14 @@ class ReviewController extends Controller
                 ], 404);
             }
 
-            // Kiểm tra đã đánh giá chưa
-            $existing = DB::table('reviews')
-                ->where('user_id', $userId)
-                ->where('product_id', $productId)
-                ->first();
-
-            if ($existing) {
-                // Cho phép cập nhật đánh giá cũ
-                DB::table('reviews')
-                    ->where('id', $existing->id)
-                    ->update([
-                        'rating' => $rating,
-                        'content' => $content,
-                        'updated_at' => now()
-                    ]);
-
-                return response()->json([
-                    'status' => 'success',
-                    'message' => 'Đã cập nhật đánh giá',
-                    'data' => ['id' => $existing->id]
-                ]);
-            }
-
-            // Tạo đánh giá mới
+            // Cho phép user đánh giá nhiều lần - không kiểm tra đánh giá cũ
+            // Tạo đánh giá mới (cho phép user đánh giá nhiều lần)
             $reviewId = DB::table('reviews')->insertGetId([
                 'user_id' => $userId,
                 'product_id' => $productId,
                 'rating' => $rating,
                 'content' => $content,
+                'status' => 1, // Mặc định hiển thị
                 'created_at' => now(),
                 'updated_at' => now()
             ]);

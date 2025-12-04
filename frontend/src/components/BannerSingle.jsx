@@ -1,38 +1,97 @@
-import React from 'react'
+import React, { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-
-const stats = [
-  { id: 1, value: '05K', label: 'Khách hàng hài lòng' },
-  { id: 2, value: '16K', label: 'Sản phẩm cao cấp' },
-  { id: 3, value: '12K', label: 'Đơn hàng đã giao' },
-  { id: 4, value: '25K', label: 'Thành viên hoạt động' },
-]
+import { ClipLoader } from 'react-spinners'
+import { axiosInstance } from '../utils/axiosConfig'
+import { getImageUrl } from '../utils/imageHelper'
 
 const BannerSingle = () => {
+  const [banner, setBanner] = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetchBanner()
+  }, [])
+
+  const fetchBanner = async () => {
+    try {
+      setLoading(true)
+      const response = await axiosInstance.get('/banners', {
+        params: { position: 1 } // Lấy banner single
+      })
+      
+      if (response.data.status === 'success') {
+        const bannersData = response.data.data || []
+        const bannersArray = Array.isArray(bannersData) ? bannersData : []
+        // Lấy banner đầu tiên đang hoạt động và có ảnh
+        const activeBanner = bannersArray.find(b => b.status === 1 && b.image)
+        
+        if (activeBanner) {
+          setBanner({
+            id: activeBanner.id,
+            badge: activeBanner.badge || 'Danh mục',
+            title: activeBanner.title || '',
+            description: activeBanner.description || '',
+            image: getImageUrl(activeBanner.image),
+            link: activeBanner.link || '/collections/featured'
+          })
+        } else {
+          // Fallback banner nếu không có
+          setBanner(null)
+        }
+      }
+    } catch (error) {
+      console.error('Lỗi khi lấy banner:', error)
+      setBanner(null)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Nếu không có banner, không hiển thị gì cả
+  if (loading) {
+    return (
+      <section className="section">
+        <div className="container">
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'center', 
+            alignItems: 'center',
+            minHeight: '200px'
+          }}>
+            <ClipLoader color="#1976d2" size={30} />
+          </div>
+        </div>
+      </section>
+    )
+  }
+
+  if (!banner) {
+    return null // Không hiển thị nếu không có banner
+  }
+
   return (
     <section className="section">
       <div className="container">
         <div className="trending">
           <div className="trending_content">
-            <p className="trending_p">Danh mục</p>
-            <h2 className="trending_title">Nâng tầm trải nghiệm âm nhạc</h2>
-            <div className="trending_stats">
-              {stats.map((stat) => (
-                <div key={stat.id}>
-                  <span>{stat.value}</span>
-                  <p>{stat.label}</p>
-                </div>
-              ))}
-            </div>
-            <Link to="/collections/audio" className="trending_btn">
+            {banner.badge && <p className="trending_p">{banner.badge}</p>}
+            {banner.title && <h2 className="trending_title">{banner.title}</h2>}
+            {banner.description && (
+              <div className="trending_stats" style={{ marginTop: '20px' }}>
+                <p style={{ fontSize: '1.4rem', color: '#666' }}>{banner.description}</p>
+              </div>
+            )}
+            <Link to={banner.link} className="trending_btn">
               Mua ngay
             </Link>
           </div>
-          <img
-            src="https://images.unsplash.com/photo-1484704849700-f032a568e944?auto=format&fit=crop&w=900&q=80"
-            alt="Portable speaker"
-            className="trending_img"
-          />
+          {banner.image && (
+            <img
+              src={banner.image}
+              alt={banner.title || 'Banner'}
+              className="trending_img"
+            />
+          )}
         </div>
       </div>
     </section>

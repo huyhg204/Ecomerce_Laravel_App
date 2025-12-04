@@ -10,7 +10,6 @@ import { authService } from '../utils/authService'
 const Carts = () => {
   const navigate = useNavigate();
   const [cartItems, setCartItems] = useState([])
-  const [couponCode, setCouponCode] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -36,35 +35,40 @@ const Carts = () => {
     }
   }
 
-  const updateQuantity = async (productId, newQuantity) => {
+  const updateQuantity = async (productId, size, newQuantity) => {
     if (newQuantity < 1) return
     
     try {
-      await axiosInstance.post('/cart/add', {
+      const payload = {
         product_id: productId,
-        quantity: newQuantity,
-      })
-      // Cập nhật local state
-      setCartItems(
-        cartItems.map((item) => 
-          item.product_id === productId
-            ? { ...item, quantity_item: newQuantity, total_item: item.price_product * newQuantity }
-            : item
-        )
-      )
+        quantity_item: newQuantity,
+        update_mode: true, // Báo cho backend biết là set quantity mới, không phải cộng thêm
+      }
+      if (size) {
+        payload.size = size
+      }
+      
+      await axiosInstance.post('/cart/add', payload)
+      // Refresh cart từ API để lấy dữ liệu mới nhất
+      await fetchCart()
     } catch (error) {
       toast.error('Không thể cập nhật số lượng', {
-        description: 'Vui lòng thử lại sau.',
+        description: error.response?.data?.message || 'Vui lòng thử lại sau.',
       })
     }
   }
 
-  const removeItem = async (productId) => {
+  const removeItem = async (productId, size) => {
     try {
-      await axiosInstance.post('/cart/remove', {
+      const payload = {
         product_id: productId,
-      })
-      setCartItems(cartItems.filter((item) => item.product_id !== productId))
+      }
+      if (size) {
+        payload.size = size
+      }
+      await axiosInstance.post('/cart/remove', payload)
+      // Refresh cart từ API để lấy dữ liệu mới nhất
+      await fetchCart()
     } catch (error) {
       toast.error('Không thể xóa sản phẩm', {
         description: 'Vui lòng thử lại sau.',
@@ -78,22 +82,21 @@ const Carts = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Tính tổng giá giảm (tạm tính)
   const subtotal = cartItems.reduce((sum, item) => {
-    return sum + (item.price_product * item.quantity_item)
+    const discountPrice = item.discount_price || item.price_product
+    return sum + (discountPrice * item.quantity_item)
   }, 0)
-  const shipping = 0 // Free shipping
-  const total = subtotal + shipping
+  
+  // Tính tổng giá gốc
+  const totalOriginal = cartItems.reduce((sum, item) => {
+    const originalPrice = item.original_price || item.price_product
+    return sum + (originalPrice * item.quantity_item)
+  }, 0)
+  
+  // Tiết kiệm = tổng giá gốc - tổng giá giảm
+  const savings = totalOriginal - subtotal
 
-  const handleApplyCoupon = () => {
-    if (!couponCode.trim()) {
-      toast.error('Vui lòng nhập mã giảm giá')
-      return
-    }
-    // Logic apply coupon
-    toast.success('Mã giảm giá đã được áp dụng!', {
-      description: `Mã ${couponCode} đã được áp dụng thành công.`,
-    })
-  }
 
   return (
     <div>
@@ -148,7 +151,7 @@ const Carts = () => {
                 {/* Table Header */}
                 <div style={{
                   display: 'grid',
-                  gridTemplateColumns: '2fr 1fr 1fr 1fr',
+                  gridTemplateColumns: '2fr 1.5fr 1fr 1fr',
                   backgroundColor: '#f5f5f5',
                   padding: '15px 20px',
                   borderBottom: '1px solid #e0e0e0',
@@ -206,15 +209,17 @@ const Carts = () => {
                       const productId = item.product_id
                       const productName = item.name_product
                       const productImage = item.image_product
-                      const productPrice = item.price_product
+                      const discountPrice = item.discount_price || item.price_product
+                      const originalPrice = item.original_price || item.price_product
                       const quantity = item.quantity_item
+                      const size = item.size
                       
                       return (
                         <div 
-                          key={productId}
+                          key={`${productId}_${size || ''}`}
                           style={{
                             display: 'grid',
-                            gridTemplateColumns: '2fr 1fr 1fr 1fr',
+                            gridTemplateColumns: '2fr 1.5fr 1fr 1fr',
                             padding: '20px',
                             borderBottom: index < cartItems.length - 1 ? '1px solid #e0e0e0' : 'none',
                             alignItems: 'center'
@@ -222,7 +227,7 @@ const Carts = () => {
                         >
                           <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
                             <button
-                              onClick={() => removeItem(productId)}
+                              onClick={() => removeItem(productId, size)}
                               aria-label="Xóa sản phẩm"
                               style={{
                                 background: 'none',
@@ -263,10 +268,30 @@ const Carts = () => {
                                 Không có ảnh
                               </div>
                             )}
-                            <span style={{ fontSize: '1.4rem', fontWeight: '500' }}>{productName}</span>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                              <span style={{ fontSize: '1.4rem', fontWeight: '500' }}>{productName}</span>
+                              {size && (
+                                <span style={{ fontSize: '1.2rem', color: '#666' }}>Size: {size}</span>
+                              )}
+                            </div>
                           </div>
                           <div style={{ textAlign: 'right', fontSize: '1.4rem' }}>
-                            {formatCurrency(productPrice)}
+                            {originalPrice > discountPrice ? (
+                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '5px' }}>
+                                <span style={{ color: '#dc3545', fontWeight: 'bold' }}>
+                                  {formatCurrency(discountPrice)}
+                                </span>
+                                <span style={{ 
+                                  color: '#999', 
+                                  textDecoration: 'line-through',
+                                  fontSize: '1.2rem'
+                                }}>
+                                  {formatCurrency(originalPrice)}
+                                </span>
+                              </div>
+                            ) : (
+                              <span>{formatCurrency(discountPrice)}</span>
+                            )}
                           </div>
                           <div style={{ textAlign: 'center' }}>
                             <div style={{ 
@@ -277,7 +302,7 @@ const Carts = () => {
                               overflow: 'hidden'
                             }}>
                               <button
-                                onClick={() => updateQuantity(productId, quantity - 1)}
+                                onClick={() => updateQuantity(productId, size, quantity - 1)}
                                 aria-label="Giảm số lượng"
                                 style={{
                                   padding: '8px 12px',
@@ -295,7 +320,7 @@ const Carts = () => {
                                 type="number"
                                 value={quantity}
                                 onChange={(e) =>
-                                  updateQuantity(productId, parseInt(e.target.value) || 1)
+                                  updateQuantity(productId, size, parseInt(e.target.value) || 1)
                                 }
                                 min="1"
                                 style={{
@@ -308,7 +333,7 @@ const Carts = () => {
                                 }}
                               />
                               <button
-                                onClick={() => updateQuantity(productId, quantity + 1)}
+                                onClick={() => updateQuantity(productId, size, quantity + 1)}
                                 aria-label="Tăng số lượng"
                                 style={{
                                   padding: '8px 12px',
@@ -325,7 +350,7 @@ const Carts = () => {
                             </div>
                           </div>
                           <div style={{ textAlign: 'right', fontSize: '1.5rem', fontWeight: 'bold', color: '#1976d2' }}>
-                            {formatCurrency(productPrice * quantity)}
+                            {formatCurrency(discountPrice * quantity)}
                           </div>
                         </div>
                       )
@@ -373,48 +398,6 @@ const Carts = () => {
                 </button>
               </div>
 
-              {/* Coupon Section */}
-              <div style={{
-                backgroundColor: '#f9f9f9',
-                padding: '20px',
-                borderRadius: '8px',
-                border: '1px solid #e0e0e0'
-              }}>
-                <h3 style={{ fontSize: '1.6rem', marginBottom: '15px', fontWeight: 'bold' }}>
-                  Mã giảm giá
-                </h3>
-                <div style={{ display: 'flex', gap: '10px' }}>
-                  <input
-                    type="text"
-                    placeholder="Nhập mã giảm giá"
-                    value={couponCode}
-                    onChange={(e) => setCouponCode(e.target.value)}
-                    style={{
-                      flex: 1,
-                      padding: '12px 15px',
-                      fontSize: '1.4rem',
-                      border: '1px solid #e0e0e0',
-                      borderRadius: '5px',
-                      outline: 'none'
-                    }}
-                  />
-                  <button 
-                    onClick={handleApplyCoupon}
-                    style={{
-                      padding: '12px 20px',
-                      fontSize: '1.4rem',
-                      backgroundColor: '#1976d2',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '5px',
-                      cursor: 'pointer',
-                      fontWeight: '500'
-                    }}
-                  >
-                    Áp dụng mã
-                  </button>
-                </div>
-              </div>
             </div>
 
             {/* Right Column - Cart Total */}
@@ -441,15 +424,18 @@ const Carts = () => {
                   <span>Tạm tính:</span>
                   <span>{formatCurrency(subtotal)}</span>
                 </div>
-                <div style={{ 
-                  display: 'flex', 
-                  justifyContent: 'space-between', 
-                  marginBottom: '15px',
-                  fontSize: '1.4rem'
-                }}>
-                  <span>Phí vận chuyển:</span>
-                  <span style={{ color: '#28a745' }}>Miễn phí</span>
-                </div>
+                {savings > 0 && (
+                  <div style={{ 
+                    display: 'flex', 
+                    justifyContent: 'space-between', 
+                    marginBottom: '15px',
+                    fontSize: '1.4rem',
+                    color: '#28a745'
+                  }}>
+                    <span>Tiết kiệm:</span>
+                    <span>{formatCurrency(savings)}</span>
+                  </div>
+                )}
                 <div style={{ 
                   display: 'flex', 
                   justifyContent: 'space-between',
@@ -459,7 +445,7 @@ const Carts = () => {
                   fontWeight: 'bold'
                 }}>
                   <span>Tổng cộng:</span>
-                  <span style={{ color: '#1976d2' }}>{formatCurrency(total)}</span>
+                  <span style={{ color: '#1976d2' }}>{formatCurrency(subtotal)}</span>
                 </div>
               </div>
               <Link 

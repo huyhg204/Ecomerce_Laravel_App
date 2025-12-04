@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { 
-  FaHome, FaBox, FaTags, FaUsers, FaShoppingBag, FaStar,
+  FaHome, FaBox, FaTags, FaUsers, FaShoppingBag, FaStar, FaTicketAlt, FaImages,
   FaSignOutAlt, FaBars, FaTimes 
 } from 'react-icons/fa'
 import { authService } from '../utils/authService'
@@ -66,9 +66,11 @@ const AdminLayout = ({ children }) => {
     { path: '/admin', label: 'Dashboard', icon: FaHome },
     { path: '/admin/products', label: 'Sản phẩm', icon: FaBox },
     { path: '/admin/categories', label: 'Danh mục', icon: FaTags },
+    { path: '/admin/banners', label: 'Banner', icon: FaImages },
     { path: '/admin/users', label: 'Người dùng', icon: FaUsers },
     { path: '/admin/orders', label: 'Đơn hàng', icon: FaShoppingBag },
     { path: '/admin/reviews', label: 'Đánh giá', icon: FaStar },
+    { path: '/admin/vouchers', label: 'Voucher', icon: FaTicketAlt },
     // { path: '/admin/revenue', label: 'Doanh thu', icon: FaChartLine },
   ]
 

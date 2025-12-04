@@ -116,6 +116,11 @@ const Login = () => {
                 required
               />
             </div>
+            <div className="form_group" style={{ textAlign: 'right', marginBottom: '10px' }}>
+              <Link to="/forgot-password" className="form_auth_link" style={{ fontSize: '1.3rem' }}>
+                Quên mật khẩu?
+              </Link>
+            </div>
             <div className="form_group">
               <button type="submit" className="form_btn" disabled={loading} style={{ position: 'relative' }}>
                 {loading ? (

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { ClipLoader } from 'react-spinners'
-import { FaPlus, FaEdit, FaUndo, FaSearch, FaEye, FaEyeSlash, FaChevronLeft, FaChevronRight } from 'react-icons/fa'
+import { FaPlus, FaEdit, FaUndo, FaSearch, FaEye, FaEyeSlash, FaChevronLeft, FaChevronRight, FaTrash, FaInfoCircle } from 'react-icons/fa'
 import { toast } from 'sonner'
 import { axiosInstance } from '../../utils/axiosConfig'
 import { formatCurrency } from '../../utils/formatCurrency'
@@ -19,16 +19,38 @@ const AdminProducts = () => {
     name: '',
     description: '',
     price: '',
+    original_price: '',
+    discount_percent: '',
     category_id: '',
     stock: '',
     image: ''
   })
+  const [attributes, setAttributes] = useState([]) // [{ type: 'Size', value: 'S', quantity: 10 }, ...]
+  // eslint-disable-next-line no-unused-vars
+  const [attributeTypes, setAttributeTypes] = useState(['Size', 'Color', 'Material']) // Các loại thuộc tính
+  // eslint-disable-next-line no-unused-vars
+  const [availableAttributeValues, setAvailableAttributeValues] = useState({}) // { 'Size': ['S', 'M', 'L'], 'Color': ['Đỏ', 'Xanh'], ... }
+  const [productAttributesDetail, setProductAttributesDetail] = useState(null) // { productId: { attributes: [...] } }
+  const [showAttributesTooltip, setShowAttributesTooltip] = useState(null) // productId đang hiển thị tooltip
   const fileInputRef = useRef(null)
 
   useEffect(() => {
     fetchProducts()
     fetchCategories()
   }, [])
+
+  // Đóng tooltip khi click ra ngoài
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (showAttributesTooltip && !e.target.closest('[data-attributes-tooltip]')) {
+        setShowAttributesTooltip(null)
+      }
+    }
+    if (showAttributesTooltip) {
+      document.addEventListener('click', handleClickOutside)
+      return () => document.removeEventListener('click', handleClickOutside)
+    }
+  }, [showAttributesTooltip])
 
   // Đảm bảo products luôn là mảng
   useEffect(() => {
@@ -172,6 +194,34 @@ const AdminProducts = () => {
           }
         }
         
+        // Tính giá: nhập giá gốc và % giảm, backend sẽ tự tính giá giảm
+        if (formData.original_price && formData.original_price !== '') {
+          const originalPrice = parseFloat(formData.original_price)
+          if (!isNaN(originalPrice) && originalPrice > 0) {
+            data.original_price = originalPrice
+            
+            // Nếu có % giảm, gửi % giảm để backend tự tính giá giảm
+            if (formData.discount_percent && formData.discount_percent !== '') {
+              const discountPercent = parseFloat(formData.discount_percent)
+              if (!isNaN(discountPercent) && discountPercent >= 0 && discountPercent <= 100) {
+                data.discount_percent = Math.round(discountPercent)
+                // Tính giá sau giảm để cập nhật price_product (giá bán hiện tại)
+                // Ép kiểu về số nguyên trước khi tính để tránh floating point error
+                const originalPriceInt = Math.round(parseFloat(originalPrice))
+                const discountPercentInt = Math.round(parseFloat(discountPercent))
+                // Sử dụng công thức: (giá_gốc * (100 - %giảm)) / 100 để tránh floating point error
+                // Ví dụ: (1000000 * 90) / 100 = 900000
+                const discountPrice = (originalPriceInt * (100 - discountPercentInt)) / 100
+                // Đảm bảo giá là số nguyên (không có số thập phân) - làm tròn để xử lý trường hợp có số lẻ
+                data.price_product = Math.round(discountPrice)
+              }
+            } else {
+              // Nếu không có % giảm, giá bán = giá gốc
+              data.price_product = originalPrice
+            }
+          }
+        }
+        
         return data
       }
       
@@ -195,6 +245,16 @@ const AdminProducts = () => {
           if (updateData.quantity_product !== undefined) {
             formDataToSend.append('quantity_product', updateData.quantity_product.toString())
           }
+          if (updateData.original_price) {
+            formDataToSend.append('original_price', updateData.original_price.toString())
+          }
+          if (updateData.discount_percent) {
+            formDataToSend.append('discount_percent', updateData.discount_percent.toString())
+          }
+          // Gửi attributes
+          if (attributes.length > 0) {
+            formDataToSend.append('attributes', JSON.stringify(attributes))
+          }
           formDataToSend.append('image_product', formData.image)
           // Laravel cần _method=PUT khi dùng FormData với POST
           formDataToSend.append('_method', 'PUT')
@@ -212,6 +272,9 @@ const AdminProducts = () => {
           await axiosInstance.post(`/admin/products/${editingProduct.id}`, formDataToSend)
         } else {
           // Gửi JSON nếu không có file mới (giữ nguyên hình ảnh cũ)
+          if (attributes.length > 0) {
+            updateData.attributes = attributes
+          }
           await axiosInstance.put(`/admin/products/${editingProduct.id}`, updateData)
         }
         toast.success('Cập nhật sản phẩm thành công')
@@ -232,6 +295,16 @@ const AdminProducts = () => {
           if (createData.quantity_product !== undefined) {
             formDataToSend.append('quantity_product', createData.quantity_product.toString())
           }
+          if (createData.original_price) {
+            formDataToSend.append('original_price', createData.original_price.toString())
+          }
+          if (createData.discount_percent) {
+            formDataToSend.append('discount_percent', createData.discount_percent.toString())
+          }
+          // Gửi attributes
+          if (attributes.length > 0) {
+            formDataToSend.append('attributes', JSON.stringify(attributes))
+          }
           formDataToSend.append('image_product', formData.image)
           
           // Debug: Log FormData để kiểm tra
@@ -247,6 +320,9 @@ const AdminProducts = () => {
           await axiosInstance.post('/admin/products', formDataToSend)
         } else {
           // Gửi JSON nếu không có file (image là optional)
+          if (attributes.length > 0) {
+            createData.attributes = attributes
+          }
           await axiosInstance.post('/admin/products', createData)
         }
         toast.success('Tạo sản phẩm thành công')
@@ -257,10 +333,13 @@ const AdminProducts = () => {
         name: '',
         description: '',
         price: '',
+        original_price: '',
+        discount_percent: '',
         category_id: '',
         stock: '',
         image: ''
       })
+      setAttributes([])
       // Reset file input
       if (fileInputRef.current) {
         fileInputRef.current.value = ''
@@ -309,16 +388,87 @@ const AdminProducts = () => {
     }
   }
 
-  const handleEdit = (product) => {
+  const handleEdit = async (product) => {
     setEditingProduct(product)
+    
+    // Lấy đầy đủ thông tin sản phẩm từ API (bao gồm discount_percent và attributes)
+    try {
+      const response = await axiosInstance.get(`/admin/products/${product.id}`)
+      if (response.data.status === 'success' && response.data.data) {
+        const productData = response.data.data.product || product
+        const productAttributes = response.data.data.attributes || []
+        
+        // Lấy discount_percent từ API response (ưu tiên) hoặc tính từ giá
+    let discountPercent = ''
+        if (productData.discount_percent !== null && productData.discount_percent !== undefined) {
+          discountPercent = productData.discount_percent.toString()
+        } else if (productData.original_price && productData.discount_price && productData.original_price > productData.discount_price) {
+          discountPercent = Math.round(((productData.original_price - productData.discount_price) / productData.original_price) * 100).toString()
+    }
+    
     setFormData({
-      name: product.name_product || '',
-      description: product.description_product || '',
-      price: product.price_product || '',
-      category_id: product.category_id || '',
-      stock: product.quantity_product || '',
+          name: productData.name_product || '',
+          description: productData.description_product || '',
+          price: productData.discount_price || productData.price_product || '',
+          original_price: productData.original_price || '',
+      discount_percent: discountPercent,
+          category_id: productData.category_id || '',
+          stock: productData.quantity_product || '',
       image: '' // Không set image URL, chỉ hiển thị preview ở form
     })
+    
+        // Lấy attributes từ API response
+        if (Array.isArray(productAttributes) && productAttributes.length > 0) {
+          const mappedAttributes = productAttributes.map(attr => ({
+          type: attr.type || (attr.size ? 'Size' : attr.color ? 'Color' : ''),
+          value: attr.value || attr.size || attr.color || '',
+          quantity: attr.quantity || 0,
+          attribute_option_id: attr.attribute_option_id || null
+        }))
+          setAttributes(mappedAttributes)
+      } else {
+          setAttributes([])
+        }
+      } else {
+        // Fallback nếu API không trả về đúng format
+        let discountPercent = ''
+        if (product.original_price && product.discount_price && product.original_price > product.discount_price) {
+          discountPercent = Math.round(((product.original_price - product.discount_price) / product.original_price) * 100).toString()
+        }
+        
+        setFormData({
+          name: product.name_product || '',
+          description: product.description_product || '',
+          price: product.discount_price || product.price_product || '',
+          original_price: product.original_price || '',
+          discount_percent: discountPercent,
+          category_id: product.category_id || '',
+          stock: product.quantity_product || '',
+          image: ''
+        })
+        setAttributes([])
+      }
+    } catch (error) {
+      console.error('Lỗi khi lấy thông tin sản phẩm:', error)
+      // Fallback với dữ liệu từ product object
+      let discountPercent = ''
+      if (product.original_price && product.discount_price && product.original_price > product.discount_price) {
+        discountPercent = Math.round(((product.original_price - product.discount_price) / product.original_price) * 100).toString()
+      }
+      
+      setFormData({
+        name: product.name_product || '',
+        description: product.description_product || '',
+        price: product.discount_price || product.price_product || '',
+        original_price: product.original_price || '',
+        discount_percent: discountPercent,
+        category_id: product.category_id || '',
+        stock: product.quantity_product || '',
+        image: ''
+      })
+      setAttributes([])
+    }
+    
     setShowModal(true)
   }
 
@@ -507,10 +657,13 @@ const AdminProducts = () => {
               name: '',
               description: '',
               price: '',
+              original_price: '',
+              discount_percent: '',
               category_id: '',
               stock: '',
               image: ''
             })
+            setAttributes([])
             // Reset file input
             if (fileInputRef.current) {
               fileInputRef.current.value = ''
@@ -666,6 +819,16 @@ const AdminProducts = () => {
                   color: '#495057',
                   letterSpacing: '0.01em'
                 }}>
+                  Giá gốc / Giảm
+                </th>
+                <th style={{ 
+                  padding: '18px 16px', 
+                  textAlign: 'left', 
+                  fontSize: '1.3rem', 
+                  fontWeight: '600',
+                  color: '#495057',
+                  letterSpacing: '0.01em'
+                }}>
                   Tồn kho
                 </th>
                 <th style={{ 
@@ -693,7 +856,7 @@ const AdminProducts = () => {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan="8" style={{ 
+                  <td colSpan="9" style={{ 
                     padding: '60px 40px', 
                     textAlign: 'center', 
                     fontSize: '1.5rem', 
@@ -713,7 +876,7 @@ const AdminProducts = () => {
                 </tr>
               ) : paginatedProducts.length === 0 ? (
                 <tr>
-                  <td colSpan="8" style={{ 
+                  <td colSpan="9" style={{ 
                     padding: '60px 40px', 
                     textAlign: 'center', 
                     fontSize: '1.5rem', 
@@ -801,15 +964,180 @@ const AdminProducts = () => {
                       fontWeight: '600',
                       color: '#1976d2'
                     }}>
-                      {formatCurrency(product.price_product)}
+                      {formatCurrency(product.discount_price || product.price_product)}
+                    </td>
+                    <td style={{ 
+                      padding: '16px', 
+                      fontSize: '1.3rem'
+                    }}>
+                      {product.original_price && product.original_price > 0 && (
+                        (product.discount_percent && product.discount_percent > 0) || 
+                        (product.discount_price && product.original_price > product.discount_price)
+                      ) ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          <span style={{ 
+                            color: '#999',
+                            textDecoration: 'line-through',
+                            fontSize: '1.2rem'
+                          }}>
+                            {formatCurrency(product.original_price)}
+                          </span>
+                          <span style={{ 
+                            color: '#d32f2f',
+                            fontWeight: '600',
+                            fontSize: '1.2rem'
+                          }}>
+                            -{product.discount_percent && product.discount_percent > 0 
+                              ? product.discount_percent 
+                              : (product.discount_price && product.original_price 
+                                ? Math.round(((product.original_price - product.discount_price) / product.original_price) * 100) 
+                                : 0)}%
+                          </span>
+                        </div>
+                      ) : (
+                        <span style={{ color: '#999' }}>-</span>
+                      )}
                     </td>
                     <td style={{ 
                       padding: '16px', 
                       fontSize: '1.4rem',
                       fontWeight: '500',
-                      color: '#212529'
+                      color: '#212529',
+                      position: 'relative'
                     }}>
-                      {product.quantity_product}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span>{product.quantity_product}</span>
+                        <div style={{ position: 'relative', display: 'inline-block' }} data-attributes-tooltip>
+                          <button
+                            type="button"
+                            onClick={async (e) => {
+                              e.stopPropagation()
+                              // Nếu đã có dữ liệu, toggle tooltip
+                              if (productAttributesDetail?.[product.id]) {
+                                setShowAttributesTooltip(showAttributesTooltip === product.id ? null : product.id)
+                              } else {
+                                // Load attributes từ API
+                                try {
+                                  const response = await axiosInstance.get(`/admin/products/${product.id}`)
+                                  if (response.data.status === 'success' && response.data.data?.attributes) {
+                                    const attrs = response.data.data.attributes
+                                    setProductAttributesDetail(prev => ({
+                                      ...prev,
+                                      [product.id]: attrs
+                                    }))
+                                    setShowAttributesTooltip(product.id)
+                                  } else {
+                                    toast.info('Sản phẩm này chưa có thuộc tính')
+                                  }
+                                } catch (error) {
+                                  console.error('Lỗi khi lấy thuộc tính:', error)
+                                  toast.error('Không thể tải thông tin thuộc tính')
+                                }
+                              }
+                            }}
+                            onMouseEnter={async (e) => {
+                              // Đổi màu khi hover
+                              e.target.style.color = '#1565c0'
+                              // Load attributes khi hover nếu chưa có
+                              if (!productAttributesDetail?.[product.id]) {
+                                try {
+                                  const response = await axiosInstance.get(`/admin/products/${product.id}`)
+                                  if (response.data.status === 'success' && response.data.data?.attributes) {
+                                    const attrs = response.data.data.attributes
+                                    if (attrs && attrs.length > 0) {
+                                      setProductAttributesDetail(prev => ({
+                                        ...prev,
+                                        [product.id]: attrs
+                                      }))
+                                    }
+                                  }
+                                } catch (error) {
+                                  // Silent fail
+                                }
+                              }
+                            }}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              cursor: 'pointer',
+                              color: '#1976d2',
+                              fontSize: '1.4rem',
+                              padding: '4px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              transition: 'color 0.2s ease'
+                            }}
+                            onMouseLeave={(e) => {
+                              e.target.style.color = '#1976d2'
+                            }}
+                            title="Xem chi tiết số lượng theo thuộc tính"
+                          >
+                            <FaInfoCircle />
+                          </button>
+                          {showAttributesTooltip === product.id && productAttributesDetail?.[product.id] && (
+                            <div 
+                              style={{
+                                position: 'absolute',
+                                backgroundColor: '#fff',
+                                border: '2px solid #e9ecef',
+                                borderRadius: '8px',
+                                padding: '12px',
+                                boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                                zIndex: 2000,
+                                minWidth: '220px',
+                                maxWidth: '300px',
+                                top: '100%',
+                                left: '50%',
+                                transform: 'translateX(-50%)',
+                                marginTop: '8px'
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                              data-attributes-tooltip
+                            >
+                              <div style={{ 
+                                fontSize: '1.3rem', 
+                                fontWeight: '600', 
+                                marginBottom: '8px',
+                                color: '#495057',
+                                borderBottom: '1px solid #e9ecef',
+                                paddingBottom: '6px'
+                              }}>
+                                Số lượng theo thuộc tính:
+                              </div>
+                              {productAttributesDetail[product.id].length > 0 ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '200px', overflowY: 'auto' }}>
+                                  {productAttributesDetail[product.id].map((attr, idx) => (
+                                    <div key={idx} style={{
+                                      display: 'flex',
+                                      justifyContent: 'space-between',
+                                      fontSize: '1.2rem',
+                                      padding: '6px 0',
+                                      borderBottom: idx < productAttributesDetail[product.id].length - 1 ? '1px solid #f0f0f0' : 'none'
+                                    }}>
+                                      <span style={{ color: '#6c757d' }}>
+                                        <strong style={{ color: '#212529' }}>
+                                          {attr.type || (attr.size ? 'Size' : attr.color ? 'Color' : 'N/A')}
+                                        </strong>
+                                        {': '}
+                                        <span style={{ color: '#495057' }}>
+                                          {attr.value || attr.size || attr.color || 'N/A'}
+                                        </span>
+                                      </span>
+                                      <span style={{ fontWeight: '600', color: '#1976d2', marginLeft: '12px' }}>
+                                        {attr.quantity || 0}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <div style={{ fontSize: '1.2rem', color: '#6c757d', padding: '8px 0' }}>
+                                  Chưa có thuộc tính
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </td>
                     <td style={{ padding: '16px' }}>
                       <span style={{
@@ -1123,7 +1451,12 @@ const AdminProducts = () => {
           padding: '20px',
           backdropFilter: 'blur(4px)'
         }}
-        onClick={() => setShowModal(false)}
+        onClick={(e) => {
+          if (e.target === e.currentTarget) {
+            setShowModal(false)
+            setShowAttributesTooltip(null)
+          }
+        }}
         >
           <div
             style={{
@@ -1229,7 +1562,7 @@ const AdminProducts = () => {
                     fontWeight: '600',
                     color: '#495057'
                   }}>
-                    Giá *
+                    Giá bán *
                   </label>
                   <input
                     type="number"
@@ -1238,6 +1571,7 @@ const AdminProducts = () => {
                     onChange={handleInputChange}
                     required
                     min="0"
+                    placeholder="Giá bán hiện tại"
                     style={{
                       width: '100%',
                       padding: '12px 16px',
@@ -1255,6 +1589,7 @@ const AdminProducts = () => {
                       e.target.style.borderColor = '#e9ecef'
                       e.target.style.boxShadow = 'none'
                     }}
+                    disabled={true}
                   />
                 </div>
                 <div>
@@ -1292,6 +1627,130 @@ const AdminProducts = () => {
                       e.target.style.boxShadow = 'none'
                     }}
                   />
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
+                <div>
+                  <label style={{ 
+                    display: 'block', 
+                    marginBottom: '8px', 
+                    fontSize: '1.4rem', 
+                    fontWeight: '600',
+                    color: '#495057'
+                  }}>
+                    Giá gốc (tùy chọn)
+                  </label>
+                  <input
+                    type="number"
+                    name="original_price"
+                    value={formData.original_price}
+                    onChange={(e) => {
+                      setFormData({ ...formData, original_price: e.target.value })
+                      // Tự động tính giá giảm nếu có % giảm
+                      if (formData.discount_percent && e.target.value) {
+                        const originalPrice = parseFloat(e.target.value)
+                        const discountPercent = parseFloat(formData.discount_percent)
+                        if (!isNaN(originalPrice) && !isNaN(discountPercent)) {
+                        // Tính giá sau giảm: ép kiểu về số nguyên trước khi tính
+                        const originalPriceInt = Math.round(parseFloat(originalPrice))
+                        const discountPercentInt = Math.round(parseFloat(discountPercent))
+                        // Sử dụng công thức: (giá_gốc * (100 - %giảm)) / 100
+                        const discountPrice = (originalPriceInt * (100 - discountPercentInt)) / 100
+                        const roundedPrice = Math.round(discountPrice)
+                        setFormData(prev => ({ ...prev, price: roundedPrice.toString() }))
+                        }
+                      }
+                    }}
+                    min="0"
+                    placeholder="Giá gốc trước khi giảm"
+                    style={{
+                      width: '100%',
+                      padding: '12px 16px',
+                      fontSize: '1.4rem',
+                      border: '2px solid #e9ecef',
+                      borderRadius: '10px',
+                      outline: 'none',
+                      transition: 'all 0.3s ease'
+                    }}
+                    onFocus={(e) => {
+                      e.target.style.borderColor = '#1976d2'
+                      e.target.style.boxShadow = '0 0 0 3px rgba(25, 118, 210, 0.1)'
+                    }}
+                    onBlur={(e) => {
+                      e.target.style.borderColor = '#e9ecef'
+                      e.target.style.boxShadow = 'none'
+                    }}
+                  />
+                </div>
+                <div>
+                  <label style={{ 
+                    display: 'block', 
+                    marginBottom: '8px', 
+                    fontSize: '1.4rem', 
+                    fontWeight: '600',
+                    color: '#495057'
+                  }}>
+                    % Giảm giá (tùy chọn)
+                  </label>
+                  <input
+                    type="number"
+                    name="discount_percent"
+                    value={formData.discount_percent}
+                    onChange={(e) => {
+                      const discountPercent = e.target.value
+                      setFormData({ ...formData, discount_percent: discountPercent })
+                      // Tự động tính giá giảm nếu có giá gốc
+                      if (formData.original_price && discountPercent) {
+                        const originalPrice = parseFloat(formData.original_price)
+                        const percent = parseFloat(discountPercent)
+                        if (!isNaN(originalPrice) && !isNaN(percent) && percent >= 0 && percent <= 100) {
+                          // Tính giá sau giảm: ép kiểu về số nguyên trước khi tính
+                          const originalPriceInt = Math.round(parseFloat(originalPrice))
+                          const percentInt = Math.round(parseFloat(percent))
+                          // Sử dụng công thức: (giá_gốc * (100 - %giảm)) / 100
+                          const discountPrice = (originalPriceInt * (100 - percentInt)) / 100
+                          const roundedPrice = Math.round(discountPrice)
+                          setFormData(prev => ({ ...prev, price: roundedPrice.toString() }))
+                        }
+                      }
+                    }}
+                    min="0"
+                    max="100"
+                    placeholder="Phần trăm giảm (0-100)"
+                    style={{
+                      width: '100%',
+                      padding: '12px 16px',
+                      fontSize: '1.4rem',
+                      border: '2px solid #e9ecef',
+                      borderRadius: '10px',
+                      outline: 'none',
+                      transition: 'all 0.3s ease'
+                    }}
+                    onFocus={(e) => {
+                      e.target.style.borderColor = '#1976d2'
+                      e.target.style.boxShadow = '0 0 0 3px rgba(25, 118, 210, 0.1)'
+                    }}
+                    onBlur={(e) => {
+                      e.target.style.borderColor = '#e9ecef'
+                      e.target.style.boxShadow = 'none'
+                    }}
+                  />
+                  {formData.original_price && formData.discount_percent && (
+                    <p style={{ 
+                      marginTop: '8px', 
+                      fontSize: '1.2rem', 
+                      color: '#d32f2f',
+                      fontWeight: '600'
+                    }}>
+                      Giá sau giảm: {formatCurrency(
+                        (() => {
+                          const originalPriceInt = Math.round(parseFloat(formData.original_price))
+                          const discountPercentInt = Math.round(parseFloat(formData.discount_percent))
+                          return Math.round((originalPriceInt * (100 - discountPercentInt)) / 100)
+                        })()
+                      )}
+                    </p>
+                  )}
                 </div>
               </div>
               <div style={{ marginBottom: '20px' }}>
@@ -1337,6 +1796,157 @@ const AdminProducts = () => {
                   ))}
                 </select>
               </div>
+              
+              {/* Quản lý thuộc tính sản phẩm */}
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{ 
+                  display: 'block', 
+                  marginBottom: '12px', 
+                  fontSize: '1.4rem', 
+                  fontWeight: '600',
+                  color: '#495057'
+                }}>
+                  Thuộc tính sản phẩm (Size, Color, Material, v.v.)
+                </label>
+                <div style={{
+                  border: '2px solid #e9ecef',
+                  borderRadius: '10px',
+                  padding: '16px',
+                  backgroundColor: '#f8f9fa'
+                }}>
+                  {attributes.length === 0 ? (
+                    <p style={{ fontSize: '1.3rem', color: '#6c757d', marginBottom: '12px' }}>
+                      Chưa có thuộc tính nào. Nhấn "Thêm thuộc tính" để thêm.
+                    </p>
+                  ) : (
+                    attributes.map((attr, index) => (
+                      <div key={index} style={{
+                        display: 'grid',
+                        gridTemplateColumns: '1fr 1fr 1fr auto',
+                        gap: '12px',
+                        marginBottom: '12px',
+                        alignItems: 'end'
+                      }}>
+                        <div>
+                          <label style={{ fontSize: '1.2rem', color: '#666', marginBottom: '4px', display: 'block' }}>
+                            Loại
+                          </label>
+                          <select
+                            value={attr.type}
+                            onChange={(e) => {
+                              const newAttributes = [...attributes]
+                              newAttributes[index].type = e.target.value
+                              setAttributes(newAttributes)
+                            }}
+                            style={{
+                              width: '100%',
+                              padding: '10px 12px',
+                              fontSize: '1.3rem',
+                              border: '2px solid #e9ecef',
+                              borderRadius: '8px',
+                              outline: 'none'
+                            }}
+                          >
+                            {attributeTypes.map(type => (
+                              <option key={type} value={type}>{type}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label style={{ fontSize: '1.2rem', color: '#666', marginBottom: '4px', display: 'block' }}>
+                            Giá trị
+                          </label>
+                          <input
+                            type="text"
+                            value={attr.value}
+                            onChange={(e) => {
+                              const newAttributes = [...attributes]
+                              newAttributes[index].value = e.target.value
+                              setAttributes(newAttributes)
+                            }}
+                            placeholder="S, M, L, Đỏ, Xanh..."
+                            style={{
+                              width: '100%',
+                              padding: '10px 12px',
+                              fontSize: '1.3rem',
+                              border: '2px solid #e9ecef',
+                              borderRadius: '8px',
+                              outline: 'none'
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: '1.2rem', color: '#666', marginBottom: '4px', display: 'block' }}>
+                            Số lượng
+                          </label>
+                          <input
+                            type="number"
+                            value={attr.quantity}
+                            onChange={(e) => {
+                              const newAttributes = [...attributes]
+                              newAttributes[index].quantity = parseInt(e.target.value) || 0
+                              setAttributes(newAttributes)
+                            }}
+                            min="0"
+                            style={{
+                              width: '100%',
+                              padding: '10px 12px',
+                              fontSize: '1.3rem',
+                              border: '2px solid #e9ecef',
+                              borderRadius: '8px',
+                              outline: 'none'
+                            }}
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const newAttributes = attributes.filter((_, i) => i !== index)
+                            setAttributes(newAttributes)
+                          }}
+                          style={{
+                            padding: '10px 16px',
+                            backgroundColor: '#dc3545',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '8px',
+                            cursor: 'pointer',
+                            fontSize: '1.3rem',
+                            fontWeight: '600',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}
+                        >
+                          <FaTrash />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAttributes([...attributes, { type: 'Size', value: '', quantity: 0 }])
+                    }}
+                    style={{
+                      padding: '10px 20px',
+                      backgroundColor: '#28a745',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontSize: '1.3rem',
+                      fontWeight: '600',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px'
+                    }}
+                  >
+                    <FaPlus /> Thêm thuộc tính
+                  </button>
+                </div>
+              </div>
+              
               <div style={{ marginBottom: '24px' }}>
                 <label style={{ 
                   display: 'block', 

@@ -8,6 +8,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Mail;
 use Carbon\Carbon;
 
 class OrderController extends Controller
@@ -101,26 +102,40 @@ class OrderController extends Controller
         $userId = Auth::id();
         $cart = session('cart', []);
 
-        // Nếu cart trong session trống và user đã đăng nhập, lấy từ database
+            // Nếu cart trong session trống và user đã đăng nhập, lấy từ database
         if (empty($cart) && $userId) {
             $cartFromDb = DB::table('carts')
                 ->join('products', 'carts.product_id', '=', 'products.id')
+                ->leftJoin('product_attributes', 'carts.product_attribute_id', '=', 'product_attributes.id')
                 ->where('carts.user_id', $userId)
                 ->select(
                     'carts.product_id', 'carts.quantity_item', 'carts.total_item',
-                    'products.image_product', 'products.name_product', 'products.price_product'
+                    'carts.product_attribute_id', 'carts.size',
+                    'products.image_product', 'products.name_product', 
+                    'products.price_product', 'products.original_price',
+                    'products.discount_price', 'products.discount_percent'
                 )
                 ->get();
             
             $cart = [];
             foreach ($cartFromDb as $item) {
-                $cart[$item->product_id] = [
+                $actualPrice = $item->discount_price ?? $item->price_product;
+                $originalPrice = $item->original_price ?? $item->price_product;
+                $cartKey = $item->product_id . ($item->size ? '_' . $item->size : '');
+                
+                $cart[$cartKey] = [
                     'product_id'    => $item->product_id,
+                    'product_attribute_id' => $item->product_attribute_id,
+                    'size' => $item->size,
                     'image_product' => $item->image_product,
                     'name_product'  => $item->name_product,
-                    'price_product' => $item->price_product,
+                    'price_product' => $actualPrice,
+                    'original_price' => $originalPrice,
+                    'discount_price' => $item->discount_price,
+                    'discount_percent' => $item->discount_percent,
                     'quantity_item' => $item->quantity_item,
                     'total_item'    => $item->total_item,
+                    'total_original' => $item->quantity_item * $originalPrice,
                 ];
             }
             
@@ -135,7 +150,51 @@ class OrderController extends Controller
             return back()->with('error', 'Giỏ hàng trống!');
         }
 
-        $totalOrder = array_sum(array_column($cart, 'total_item'));
+        // Tính tổng giá sau giảm (tạm tính)
+        $subtotalOrder = array_sum(array_column($cart, 'total_item'));
+        
+        // Xử lý voucher nếu có
+        $voucherCode = $request->input('voucher_code');
+        $voucherId = null;
+        $voucherDiscount = 0;
+        
+        if ($voucherCode) {
+            $voucher = DB::table('vouchers')
+                ->where('code', strtoupper($voucherCode))
+                ->where('is_active', true)
+                ->first();
+            
+            if ($voucher) {
+                $now = Carbon::now();
+                $startDate = Carbon::parse($voucher->start_date);
+                $endDate = Carbon::parse($voucher->end_date);
+                
+                // Kiểm tra thời gian và điều kiện
+                if ($now->gte($startDate) && $now->lte($endDate) && 
+                    $subtotalOrder >= $voucher->min_order_amount &&
+                    (!$voucher->usage_limit || $voucher->used_count < $voucher->usage_limit)) {
+                    
+                    // Tính số tiền giảm
+                    if ($voucher->type === 'percent') {
+                        $voucherDiscount = $subtotalOrder * ($voucher->value / 100);
+                        if ($voucher->max_discount_amount && $voucherDiscount > $voucher->max_discount_amount) {
+                            $voucherDiscount = $voucher->max_discount_amount;
+                        }
+                    } else {
+                        $voucherDiscount = $voucher->value;
+                        if ($voucherDiscount > $subtotalOrder) {
+                            $voucherDiscount = $subtotalOrder;
+                        }
+                    }
+                    
+                    $voucherId = $voucher->id;
+                    $voucherCode = $voucher->code;
+                }
+            }
+        }
+        
+        // Tổng thanh toán cuối cùng = subtotal - voucher discount
+        $totalOrder = $subtotalOrder - $voucherDiscount;
 
         try {
             DB::beginTransaction();
@@ -151,28 +210,49 @@ class OrderController extends Controller
             $orderId = DB::table('orders')->insertGetId([
                 'user_id'          => $userId,
                 'method_pay'       => $methodPay,
+                'subtotal_order'   => $subtotalOrder,
+                'voucher_id'       => $voucherId,
+                'voucher_code'     => $voucherCode,
+                'voucher_discount' => $voucherDiscount,
                 'total_order'      => $totalOrder,
                 'phone_customer'   => $phoneCustomer,
                 'address_customer' => $addressCustomer,
                 'name_customer'    => $nameCustomer,
                 'note_customer'    => $noteCustomer,
-                'status_order'     => 0, // 0 = Chờ xác nhận (mặc định khi đặt hàng)
-                'status_delivery'  => null, // null = Mặc định (chưa giao cho vận chuyển)
-                'status_user_order' => null, // null = Mặc định (chưa xác nhận/chưa hủy)
+                'status_order'     => 0,
+                'status_delivery'  => null,
+                'status_user_order' => null,
                 'reason_user_order' => null,
                 'date_order'       => now()
             ]);
+            
+            // Cập nhật số lần sử dụng voucher
+            if ($voucherId) {
+                DB::table('vouchers')
+                    ->where('id', $voucherId)
+                    ->increment('used_count');
+            }
 
             $productIdsInOrder = [];
             foreach ($cart as $item) {
                 DB::table('order_details')->insert([
                     'order_id'    => $orderId,
                     'product_id'  => $item['product_id'],
+                    'product_attribute_id' => $item['product_attribute_id'] ?? null,
+                    'size' => $item['size'] ?? null,
                     'quantity_detail' => $item['quantity_item'],
                     'total_detail' => $item['total_item'],
                 ]);
 
+                // Giảm số lượng trong products
                 DB::table('products')->where('id', $item['product_id'])->decrement('quantity_product', $item['quantity_item']);
+                
+                // Giảm số lượng trong product_attributes nếu có
+                if (!empty($item['product_attribute_id'])) {
+                    DB::table('product_attributes')
+                        ->where('id', $item['product_attribute_id'])
+                        ->decrement('quantity', $item['quantity_item']);
+                }
                 
                 // Lưu danh sách product_id đã được đặt hàng để xóa khỏi cart
                 $productIdsInOrder[] = $item['product_id'];
@@ -199,11 +279,63 @@ class OrderController extends Controller
             Cache::forget('top_selling_products');
             $this->clearDashboardCache();
 
+            // Gửi email xác nhận đơn hàng
+            try {
+                $user = DB::table('users')->where('id', $userId)->first();
+                if ($user && $user->email) {
+                    // Lấy thông tin đơn hàng và sản phẩm để gửi email
+                    $orderDetails = DB::table('order_details')
+                        ->join('products', 'order_details.product_id', '=', 'products.id')
+                        ->where('order_details.order_id', $orderId)
+                        ->select(
+                            'products.name_product',
+                            'products.image_product',
+                            'order_details.quantity_detail',
+                            'order_details.total_detail',
+                            'order_details.size'
+                        )
+                        ->get();
+                    
+                    // Chuẩn bị URL cho ảnh sản phẩm
+                    $appUrl = config('app.url');
+                    $orderDetailsWithUrl = $orderDetails->map(function($item) use ($appUrl) {
+                        $item->image_url = $item->image_product ? $appUrl . '/' . $item->image_product : null;
+                        return $item;
+                    });
+                    
+                    $orderData = [
+                        'order_code' => 'MDH_'.$orderId,
+                        'order_id' => $orderId,
+                        'name_customer' => $nameCustomer,
+                        'phone_customer' => $phoneCustomer,
+                        'address_customer' => $addressCustomer,
+                        'date_order' => now()->format('d/m/Y H:i'),
+                        'subtotal_order' => number_format($subtotalOrder, 0, ',', '.') . '₫',
+                        'voucher_discount' => $voucherDiscount > 0 ? number_format($voucherDiscount, 0, ',', '.') . '₫' : '0₫',
+                        'total_order' => number_format($totalOrder, 0, ',', '.') . '₫',
+                        'method_pay' => $methodPay == 1 ? 'Thanh toán qua ngân hàng' : 'Thanh toán khi nhận hàng',
+                        'products' => $orderDetailsWithUrl,
+                        'app_url' => $appUrl
+                    ];
+                    
+                    Mail::send('emails.order-confirmation', ['order' => $orderData], function ($message) use ($user, $orderData) {
+                        $message->to($user->email, $user->name ?? $orderData['name_customer'])
+                                ->subject('Xác nhận đơn hàng #' . $orderData['order_code']);
+                    });
+                }
+            } catch (\Exception $emailError) {
+                // Log lỗi email nhưng không làm gián đoạn quá trình đặt hàng
+                \Log::error('Lỗi gửi email xác nhận đơn hàng: ' . $emailError->getMessage());
+            }
+
             if ($request->expectsJson()) {
                 return response()->json([
                     'status' => 'success',
                     'message' => 'Đặt hàng thành công',
-                    'order_code' => 'MDH_'.$orderId
+                    'data' => [
+                        'order_id' => $orderId,
+                        'order_code' => 'MDH_'.$orderId
+                    ]
                 ], 201);
             }
             return back()->with('success', 'Đặt hàng thành công!');
@@ -272,7 +404,14 @@ class OrderController extends Controller
         $orderDetails = DB::table('order_details')
             ->leftJoin('products', 'order_details.product_id', '=', 'products.id')
             ->where('order_details.order_id', $id)
-            ->select('order_details.*', 'products.name_product')
+            ->select(
+                'order_details.*', 
+                'products.name_product',
+                'products.image_product',
+                'products.original_price',
+                'products.discount_price',
+                'products.discount_percent'
+            )
             ->orderByDesc('order_details.id')
             ->get();
 
@@ -323,14 +462,22 @@ class OrderController extends Controller
     }
 
     public function showUser($id) {
-        // Logic code bạn đã gửi đúng rồi
         $order = DB::table('orders')->where('id', $id)->where('user_id', Auth::id())->first();
         if (!$order) return response()->json(['status'=>'error'], 404);
 
+        // Lấy thông tin đầy đủ của order_details bao gồm size, original_price, discount_price
+        // Size được lưu trực tiếp trong order_details, không cần join với product_attributes
         $details = DB::table('order_details')
-                      ->join('products', 'order_details.product_id', '=', 'products.id')
+                      ->leftJoin('products', 'order_details.product_id', '=', 'products.id')
                       ->where('order_details.order_id', $id)
-                      ->select('products.name_product','products.image_product','order_details.quantity_detail','order_details.total_detail')
+                      ->select(
+                          'order_details.*',
+                          'products.name_product',
+                          'products.image_product',
+                          'products.original_price',
+                          'products.discount_price',
+                          'products.discount_percent'
+                      )
                       ->orderByDesc('order_details.id')
                       ->get();
 

@@ -79,19 +79,50 @@ class ProductController extends Controller
                 
                 // Cache products list (cache 5 phút)
                 $products = Cache::remember($cacheKey, 300, function () use ($statusFilter, $offset, $perPage) {
+                    // Kiểm tra xem các cột mới có tồn tại không
+                    $hasPriceFields = $this->checkColumnExists('products', 'original_price');
+                    
+                    // Kiểm tra xem bảng reviews có tồn tại không
+                    $hasReviewsTable = $this->checkTableExists('reviews');
+                    
                     $queryProducts = DB::table('products')
-                        ->leftJoin('categories_product', 'products.category_id', '=', 'categories_product.id')
-                        ->select(
-                            'products.id',
-                            'products.name_product',
-                            'products.price_product',
-                            'products.description_product',
-                            'products.image_product',
-                            'products.quantity_product',
-                            'products.status_product',
-                            'products.category_id',
-                            'categories_product.name_category'
-                        );
+                        ->leftJoin('categories_product', 'products.category_id', '=', 'categories_product.id');
+                    
+                    // Nếu có bảng reviews, join để lấy số đánh giá và rating trung bình (chỉ tính đánh giá đang hiển thị)
+                    if ($hasReviewsTable) {
+                        $queryProducts->leftJoin(DB::raw('(SELECT product_id, COUNT(*) as reviews_count, AVG(rating) as average_rating FROM reviews WHERE status = 1 GROUP BY product_id) as reviews_stats'), 'products.id', '=', 'reviews_stats.product_id');
+                    }
+                    
+                    // Select các cột cơ bản
+                    $selectFields = [
+                        'products.id',
+                        'products.name_product',
+                        'products.price_product',
+                        'products.description_product',
+                        'products.image_product',
+                        'products.quantity_product',
+                        'products.status_product',
+                        'products.category_id',
+                        'categories_product.name_category'
+                    ];
+                    
+                    // Thêm reviews_count và average_rating nếu có bảng reviews
+                    if ($hasReviewsTable) {
+                        $selectFields[] = DB::raw('COALESCE(reviews_stats.reviews_count, 0) as reviews_count');
+                        $selectFields[] = DB::raw('COALESCE(ROUND(reviews_stats.average_rating, 1), 0) as average_rating');
+                    } else {
+                        $selectFields[] = DB::raw('0 as reviews_count');
+                        $selectFields[] = DB::raw('0 as average_rating');
+                    }
+                    
+                    // Thêm các cột mới nếu đã tồn tại
+                    if ($hasPriceFields) {
+                        $selectFields[] = 'products.original_price';
+                        $selectFields[] = 'products.discount_price';
+                        $selectFields[] = 'products.discount_percent';
+                    }
+                    
+                    $queryProducts->select($selectFields);
                     
                     if ($statusFilter !== null) {
                         $queryProducts->where('products.status_product', $statusFilter);
@@ -164,14 +195,33 @@ class ProductController extends Controller
         if ($request->has('quantity_product')) {
             $request->merge(['quantity_product' => (int) $request->input('quantity_product', 0)]);
         }
+        
+        // Xử lý giá gốc và giá giảm
+        if ($request->has('original_price')) {
+            $request->merge(['original_price' => (float) $request->input('original_price')]);
+        }
+        if ($request->has('discount_price')) {
+            $request->merge(['discount_price' => (float) $request->input('discount_price')]);
+        }
+        if ($request->has('discount_percent')) {
+            $request->merge(['discount_percent' => (int) $request->input('discount_percent', 0)]);
+        }
 
         $request->validate([
             'name_product' => 'required|string|max:255',
             'price_product' => 'required|numeric|min:0',
+            'original_price' => 'nullable|numeric|min:0',
+            'discount_price' => 'nullable|numeric|min:0',
+            'discount_percent' => 'nullable|integer|min:0|max:100',
             'category_id' => 'required|integer|exists:categories_product,id',
             'description_product' => 'nullable|string',
             'quantity_product' => 'nullable|integer|min:0',
             'image_product' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
+            'sizes' => 'nullable|array', // Mảng các size (format cũ)
+            'sizes.*.size' => 'nullable|string|max:50',
+            'sizes.*.color' => 'nullable|string|max:50',
+            'sizes.*.quantity' => 'nullable|integer|min:0',
+            'attributes' => 'nullable', // Format mới: có thể là JSON string hoặc array - không validate nested vì có thể là JSON string
         ]);
 
         $imagePath = null;
@@ -183,15 +233,141 @@ class ProductController extends Controller
             $imagePath = 'uploads/products/' . $filename;
         }
 
-        DB::table('products')->insert([
+        // Tính toán giá: nhập giá gốc và % giảm, tự động tính giá giảm
+        $originalPrice = $request->input('original_price');
+        $discountPercent = $request->input('discount_percent', 0);
+        $discountPrice = null;
+        $finalPrice = $request->price_product;
+        
+        // Nếu có original_price và discount_percent, tính discount_price
+        if ($originalPrice && $discountPercent > 0) {
+            // Tính giá sau giảm: sử dụng công thức (giá_gốc * (100 - %giảm)) / 100 để tránh floating point error
+            // Ép kiểu về int trước khi tính để tránh floating point
+            $originalPriceInt = (int)round($originalPrice, 0);
+            $discountPercentInt = (int)round($discountPercent, 0);
+            // Tính toán với số nguyên để tránh floating point error
+            // Ví dụ: (1000000 * 90) / 100 = 900000
+            $discountPrice = ($originalPriceInt * (100 - $discountPercentInt)) / 100;
+            // Đảm bảo là số nguyên (không có số thập phân) - làm tròn để xử lý trường hợp có số lẻ
+            $finalPrice = (int)round($discountPrice);
+            $discountPrice = $finalPrice; // Cập nhật discountPrice để lưu vào database
+        } elseif ($originalPrice) {
+            // Chỉ có original_price, không có % giảm, giá bán = giá gốc
+            $finalPrice = (int)round($originalPrice, 0); // Làm tròn và chuyển thành số nguyên
+        }
+
+        // Kiểm tra xem các cột mới có tồn tại không
+        $hasPriceFields = $this->checkColumnExists('products', 'original_price');
+        
+        $insertData = [
             'name_product' => $request->name_product,
-            'price_product' => $request->price_product,
+            'price_product' => (int)round($finalPrice, 0), // Đảm bảo là số nguyên
             'description_product' => $request->description_product,
-            'quantity_product' => $request->input('quantity_product', 0), // <--- QUAN TRỌNG: Thêm dòng này
+            'quantity_product' => $request->input('quantity_product', 0),
             'image_product' => $imagePath,
             'category_id' => $request->category_id,
             'status_product' => 0
-        ]);
+        ];
+        
+        // Chỉ thêm các trường mới nếu cột đã tồn tại
+        if ($hasPriceFields) {
+            $insertData['original_price'] = $originalPrice ? (float)round($originalPrice, 2) : null; // Làm tròn đến 2 chữ số thập phân cho giá gốc
+            // Đảm bảo discount_price là số nguyên (không có số thập phân)
+            // Lưu dưới dạng float với 2 chữ số thập phân (để tương thích với decimal(15,2))
+            // nhưng giá trị sẽ là số nguyên (ví dụ: 900000.00)
+            if ($discountPrice !== null && $discountPrice > 0) {
+                // Đảm bảo là số nguyên trước khi lưu (đã được làm tròn ở trên)
+                // Lưu dưới dạng float để tương thích với decimal(15,2) nhưng giá trị là số nguyên
+                $insertData['discount_price'] = (float)$discountPrice;
+            } else {
+                $insertData['discount_price'] = null;
+            }
+            $insertData['discount_percent'] = $discountPercent ? (int)round($discountPercent, 0) : 0; // Đảm bảo % là số nguyên
+        }
+
+        $productId = DB::table('products')->insertGetId($insertData);
+
+        // Thêm các thuộc tính sản phẩm - hỗ trợ cả format cũ (sizes) và format mới (attributes)
+        if ($this->checkColumnExists('product_attributes', 'id')) {
+            $hasAttributeOptions = $this->checkColumnExists('attribute_options', 'id');
+            
+            // Format mới: attributes (JSON array)
+            if ($request->has('attributes')) {
+                $attributesData = $request->input('attributes');
+                // Nếu là string JSON, decode
+                if (is_string($attributesData)) {
+                    $attributesData = json_decode($attributesData, true);
+                }
+                
+                if (is_array($attributesData)) {
+                    foreach ($attributesData as $attrData) {
+                        if (!empty($attrData['type']) && !empty($attrData['value'])) {
+                            try {
+                                $attributeOptionId = null;
+                                
+                                // Nếu có bảng attribute_options, tìm hoặc tạo attribute_option
+                                if ($hasAttributeOptions) {
+                                    $attributeOption = DB::table('attribute_options')
+                                        ->where('type', $attrData['type'])
+                                        ->where('value', $attrData['value'])
+                                        ->first();
+                                    
+                                    if (!$attributeOption) {
+                                        $attributeOptionId = DB::table('attribute_options')->insertGetId([
+                                            'type' => $attrData['type'],
+                                            'value' => $attrData['value'],
+                                            'created_at' => now(),
+                                            'updated_at' => now(),
+                                        ]);
+                                    } else {
+                                        $attributeOptionId = $attributeOption->id;
+                                    }
+                                }
+                                
+                                // Lưu vào product_attributes
+                                $insertData = [
+                                    'product_id' => $productId,
+                                    'size' => $attrData['type'] === 'Size' ? $attrData['value'] : null,
+                                    'color' => $attrData['type'] === 'Color' ? $attrData['value'] : null,
+                                    'quantity' => $attrData['quantity'] ?? 0,
+                                    'created_at' => now(),
+                                    'updated_at' => now(),
+                                ];
+                                
+                                // Chỉ thêm attribute_option_id nếu cột tồn tại
+                                if ($hasAttributeOptions && $this->checkColumnExists('product_attributes', 'attribute_option_id')) {
+                                    $insertData['attribute_option_id'] = $attributeOptionId;
+                                }
+                                
+                                DB::table('product_attributes')->insert($insertData);
+                            } catch (\Exception $e) {
+                                // Bỏ qua lỗi
+                                Log::error('Error adding attribute: ' . $e->getMessage());
+                            }
+                        }
+                    }
+                }
+            }
+            // Format cũ: sizes (tương thích ngược)
+            elseif ($request->has('sizes') && is_array($request->sizes)) {
+                foreach ($request->sizes as $sizeData) {
+                    if (!empty($sizeData['size']) || !empty($sizeData['color'])) {
+                        try {
+                            DB::table('product_attributes')->insert([
+                                'product_id' => $productId,
+                                'size' => $sizeData['size'] ?? null,
+                                'color' => $sizeData['color'] ?? null,
+                                'quantity' => $sizeData['quantity'] ?? 0,
+                                'created_at' => now(),
+                                'updated_at' => now(),
+                            ]);
+                        } catch (\Exception $e) {
+                            // Bỏ qua lỗi nếu bảng chưa tồn tại
+                        }
+                    }
+                }
+            }
+        }
 
         // Clear cache
         $this->clearProductCache();
@@ -203,13 +379,125 @@ class ProductController extends Controller
     }
 
     public function edit($id, Request $request) {
-        $categoryAll = $this->getCategories();
-        $product = DB::table('products')->where('id', $id)->first();
-
-        if ($request->expectsJson()) {
-            return response()->json(['status' => 'success', 'data' => $product]);
+        try {
+            // Lấy sản phẩm
+            $product = DB::table('products')->where('id', $id)->first();
+            
+            if (!$product) {
+                if ($request->expectsJson()) {
+                    return response()->json([
+                        'status' => 'error',
+                        'message' => 'Sản phẩm không tồn tại'
+                    ], 404);
+                }
+                return redirect()->back()->with('error', 'Sản phẩm không tồn tại');
+            }
+            
+            // Lấy tên category
+            $categoryName = null;
+            if (isset($product->category_id) && $product->category_id) {
+                try {
+                    $category = DB::table('categories_product')->where('id', $product->category_id)->first();
+                    if ($category && isset($category->name_category)) {
+                        $categoryName = $category->name_category;
+                    }
+                } catch (\Exception $e) {
+                    // Bỏ qua lỗi
+                }
+            }
+            
+            // Lấy thuộc tính sản phẩm (nếu bảng tồn tại)
+            $productAttributes = [];
+            try {
+                $attrs = DB::table('product_attributes')
+                    ->where('product_id', $id)
+                    ->get();
+                
+                foreach ($attrs as $attr) {
+                    $type = '';
+                    $value = '';
+                    
+                    if (isset($attr->size) && !empty($attr->size)) {
+                        $type = 'Size';
+                        $value = $attr->size;
+                    } elseif (isset($attr->color) && !empty($attr->color)) {
+                        $type = 'Color';
+                        $value = $attr->color;
+                    }
+                    
+                    $productAttributes[] = [
+                        'id' => isset($attr->id) ? $attr->id : null,
+                        'type' => $type,
+                        'value' => $value,
+                        'quantity' => isset($attr->quantity) ? (int)$attr->quantity : 0
+                    ];
+                }
+            } catch (\Exception $e) {
+                // Bảng không tồn tại, bỏ qua
+                $productAttributes = [];
+            }
+            
+            if ($request->expectsJson()) {
+                // Tạo response array - kiểm tra từng trường an toàn
+                $originalPrice = null;
+                if (isset($product->original_price) && $product->original_price !== null && $product->original_price !== '') {
+                    $originalPrice = is_numeric($product->original_price) ? (float)round($product->original_price, 2) : null;
+                }
+                
+                $discountPrice = null;
+                if (isset($product->discount_price) && $product->discount_price !== null && $product->discount_price !== '') {
+                    // Làm tròn về số nguyên khi đọc từ database (vì giá giảm phải là số nguyên)
+                    $discountPrice = is_numeric($product->discount_price) ? (int)round($product->discount_price, 0) : null;
+                }
+                
+                $discountPercent = null;
+                if (isset($product->discount_percent) && $product->discount_percent !== null && $product->discount_percent !== '') {
+                    $discountPercent = is_numeric($product->discount_percent) ? (int)round($product->discount_percent, 0) : null;
+                }
+                
+                $productData = [
+                    'id' => isset($product->id) ? (int)$product->id : null,
+                    'name_product' => isset($product->name_product) ? (string)$product->name_product : '',
+                    'price_product' => isset($product->price_product) ? (is_numeric($product->price_product) ? (int)round($product->price_product, 0) : 0) : 0,
+                    'description_product' => isset($product->description_product) ? (string)$product->description_product : null,
+                    'image_product' => isset($product->image_product) ? (string)$product->image_product : null,
+                    'quantity_product' => isset($product->quantity_product) ? (int)$product->quantity_product : 0,
+                    'status_product' => isset($product->status_product) ? (int)$product->status_product : 0,
+                    'category_id' => isset($product->category_id) ? (int)$product->category_id : null,
+                    'name_category' => $categoryName,
+                    'original_price' => $originalPrice,
+                    'discount_price' => $discountPrice,
+                    'discount_percent' => $discountPercent
+                ];
+                
+                return response()->json([
+                    'status' => 'success',
+                    'data' => [
+                        'product' => $productData,
+                        'attributes' => $productAttributes
+                    ]
+                ]);
+            }
+            
+            $categoryAll = $this->getCategories();
+            return view('admin.pages.product.edit', compact('product', 'categoryAll', 'productAttributes'));
+        } catch (\Exception $e) {
+            Log::error('ProductController@edit error: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString(),
+                'product_id' => $id,
+                'file' => $e->getFile(),
+                'line' => $e->getLine()
+            ]);
+            
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Có lỗi xảy ra khi lấy thông tin sản phẩm',
+                    'error' => config('app.debug') ? $e->getMessage() : null
+                ], 500);
+            }
+            return redirect()->back()->with('error', 'Có lỗi xảy ra khi lấy thông tin sản phẩm');
         }
-        return view('admin.pages.product.edit', compact('product','categoryAll'));
     }
 
     // --- SỬA LỖI Ở ĐÂY: THÊM quantity_product VÀO UPDATE ---
@@ -243,14 +531,33 @@ class ProductController extends Controller
         // Merge lại vào request để validation và xử lý file có thể hoạt động
         $request->merge($dataToValidate);
 
+        // Xử lý giá gốc và % giảm
+        $originalPrice = $request->input('original_price');
+        $discountPercent = $request->input('discount_percent', 0);
+        
+        if ($originalPrice !== null) {
+            $request->merge(['original_price' => (float) $originalPrice]);
+        }
+        if ($discountPercent !== null) {
+            $request->merge(['discount_percent' => (int) $discountPercent]);
+        }
+
         // Sử dụng Validator::make() với dữ liệu đã merge
         $validator = Validator::make($request->all(), [
             'name_product' => 'required|string|max:255',
             'price_product' => 'required|numeric|min:0',
+            'original_price' => 'nullable|numeric|min:0',
+            'discount_price' => 'nullable|numeric|min:0',
+            'discount_percent' => 'nullable|integer|min:0|max:100',
             'category_id' => 'required|integer|exists:categories_product,id',
             'description_product' => 'nullable|string',
             'quantity_product' => 'nullable|integer|min:0',
             'image_product' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
+            'sizes' => 'nullable|array', // Format cũ
+            'sizes.*.size' => 'nullable|string|max:50',
+            'sizes.*.color' => 'nullable|string|max:50',
+            'sizes.*.quantity' => 'nullable|integer|min:0',
+            'attributes' => 'nullable', // Format mới: có thể là JSON string hoặc array - không validate nested
         ]);
 
         if ($validator->fails()) {
@@ -270,13 +577,55 @@ class ProductController extends Controller
 
         $productOld = DB::table('products')->where('id', $id)->first();
 
+        // Tính toán giá: nhập giá gốc và % giảm, tự động tính giá giảm
+        $originalPrice = $request->input('original_price');
+        $discountPercent = $request->input('discount_percent', 0);
+        $discountPrice = null;
+        $finalPrice = $request->price_product;
+        
+        // Nếu có original_price và discount_percent, tính discount_price
+        if ($originalPrice && $discountPercent > 0) {
+            // Tính giá sau giảm: sử dụng công thức (giá_gốc * (100 - %giảm)) / 100 để tránh floating point error
+            // Ép kiểu về int trước khi tính để tránh floating point
+            $originalPriceInt = (int)round($originalPrice, 0);
+            $discountPercentInt = (int)round($discountPercent, 0);
+            // Tính toán với số nguyên để tránh floating point error
+            // Ví dụ: (1000000 * 90) / 100 = 900000
+            $discountPrice = ($originalPriceInt * (100 - $discountPercentInt)) / 100;
+            // Đảm bảo là số nguyên (không có số thập phân) - làm tròn để xử lý trường hợp có số lẻ
+            $finalPrice = (int)round($discountPrice);
+            $discountPrice = $finalPrice; // Cập nhật discountPrice để lưu vào database
+        } elseif ($originalPrice) {
+            // Chỉ có original_price, không có % giảm, giá bán = giá gốc
+            $finalPrice = (int)round($originalPrice, 0); // Làm tròn và chuyển thành số nguyên
+        }
+
+        // Kiểm tra xem các cột mới có tồn tại không
+        $hasPriceFields = $this->checkColumnExists('products', 'original_price');
+
         $dataUpdate = [
             'name_product' => $request->name_product,
-            'price_product' => $request->price_product,
+            'price_product' => (int)round($finalPrice, 0), // Đảm bảo là số nguyên
             'description_product' => $request->description_product ?? null,
             'quantity_product' => $request->input('quantity_product', 0),
             'category_id' => $request->category_id,
         ];
+        
+        // Chỉ thêm các trường mới nếu cột đã tồn tại
+        if ($hasPriceFields) {
+            $dataUpdate['original_price'] = $originalPrice ? (float)round($originalPrice, 2) : null; // Làm tròn đến 2 chữ số thập phân cho giá gốc
+            // Đảm bảo discount_price là số nguyên (không có số thập phân)
+            // Lưu dưới dạng float với 2 chữ số thập phân (để tương thích với decimal(15,2))
+            // nhưng giá trị sẽ là số nguyên (ví dụ: 900000.00)
+            if ($discountPrice !== null && $discountPrice > 0) {
+                // Đảm bảo là số nguyên trước khi lưu (đã được làm tròn ở trên)
+                // Lưu dưới dạng float để tương thích với decimal(15,2) nhưng giá trị là số nguyên
+                $dataUpdate['discount_price'] = (float)$discountPrice;
+            } else {
+                $dataUpdate['discount_price'] = null;
+            }
+            $dataUpdate['discount_percent'] = $discountPercent ? (int)round($discountPercent, 0) : 0; // Đảm bảo % là số nguyên
+        }
 
         if ($request->hasFile('image_product')) {
             $file = $request->file('image_product');
@@ -291,6 +640,87 @@ class ProductController extends Controller
         }
 
         DB::table('products')->where('id', $id)->update($dataUpdate);
+
+        // Cập nhật thuộc tính sản phẩm - hỗ trợ cả format cũ (sizes) và format mới (attributes)
+        if ($this->checkColumnExists('product_attributes', 'id')) {
+            try {
+                // Xóa các thuộc tính cũ
+                DB::table('product_attributes')->where('product_id', $id)->delete();
+                
+                $hasAttributeOptions = $this->checkColumnExists('attribute_options', 'id');
+                
+                // Format mới: attributes (JSON array)
+                if ($request->has('attributes')) {
+                    $attributesData = $request->input('attributes');
+                    // Nếu là string JSON, decode
+                    if (is_string($attributesData)) {
+                        $attributesData = json_decode($attributesData, true);
+                    }
+                    
+                    if (is_array($attributesData)) {
+                        foreach ($attributesData as $attrData) {
+                            if (!empty($attrData['type']) && !empty($attrData['value'])) {
+                                $attributeOptionId = null;
+                                
+                                // Nếu có bảng attribute_options, tìm hoặc tạo attribute_option
+                                if ($hasAttributeOptions) {
+                                    $attributeOption = DB::table('attribute_options')
+                                        ->where('type', $attrData['type'])
+                                        ->where('value', $attrData['value'])
+                                        ->first();
+                                    
+                                    if (!$attributeOption) {
+                                        $attributeOptionId = DB::table('attribute_options')->insertGetId([
+                                            'type' => $attrData['type'],
+                                            'value' => $attrData['value'],
+                                            'created_at' => now(),
+                                            'updated_at' => now(),
+                                        ]);
+                                    } else {
+                                        $attributeOptionId = $attributeOption->id;
+                                    }
+                                }
+                                
+                                // Lưu vào product_attributes
+                                $insertData = [
+                                    'product_id' => $id,
+                                    'size' => $attrData['type'] === 'Size' ? $attrData['value'] : null,
+                                    'color' => $attrData['type'] === 'Color' ? $attrData['value'] : null,
+                                    'quantity' => $attrData['quantity'] ?? 0,
+                                    'created_at' => now(),
+                                    'updated_at' => now(),
+                                ];
+                                
+                                // Chỉ thêm attribute_option_id nếu cột tồn tại
+                                if ($hasAttributeOptions && $this->checkColumnExists('product_attributes', 'attribute_option_id')) {
+                                    $insertData['attribute_option_id'] = $attributeOptionId;
+                                }
+                                
+                                DB::table('product_attributes')->insert($insertData);
+                            }
+                        }
+                    }
+                }
+                // Format cũ: sizes (tương thích ngược)
+                elseif ($request->has('sizes') && is_array($request->sizes)) {
+                    foreach ($request->sizes as $sizeData) {
+                        if (!empty($sizeData['size']) || !empty($sizeData['color'])) {
+                            DB::table('product_attributes')->insert([
+                                'product_id' => $id,
+                                'size' => $sizeData['size'] ?? null,
+                                'color' => $sizeData['color'] ?? null,
+                                'quantity' => $sizeData['quantity'] ?? 0,
+                                'created_at' => now(),
+                                'updated_at' => now(),
+                            ]);
+                        }
+                    }
+                }
+            } catch (\Exception $e) {
+                // Bỏ qua lỗi nếu bảng chưa tồn tại
+                Log::error('Error updating attributes: ' . $e->getMessage());
+            }
+        }
 
         $this->clearProductCache();
 
@@ -318,6 +748,29 @@ class ProductController extends Controller
             return response()->json(['status' => 'success', 'message' => 'Product Restored']);
         }
         return redirect()->route('admin.product.index')->with('success', 'Khôi phục sản phẩm thành công!');
+    }
+
+    /**
+     * Kiểm tra xem cột có tồn tại trong bảng không
+     */
+    private function checkColumnExists($table, $column) {
+        try {
+            $columns = DB::getSchemaBuilder()->getColumnListing($table);
+            return in_array($column, $columns);
+        } catch (\Exception $e) {
+            return false;
+        }
+    }
+
+    /**
+     * Kiểm tra xem bảng có tồn tại không
+     */
+    private function checkTableExists($table) {
+        try {
+            return DB::getSchemaBuilder()->hasTable($table);
+        } catch (\Exception $e) {
+            return false;
+        }
     }
 
     // Hàm phụ để clear cache gọn hơn

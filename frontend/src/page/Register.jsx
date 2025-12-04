@@ -109,16 +109,34 @@ const Register = () => {
         // Xử lý validation errors từ server (Laravel format)
         if (error.response.data?.errors) {
           const serverErrors = {};
+          let hasUniqueError = false; // Kiểm tra có lỗi trùng lặp không
+          
           // Laravel trả về errors dạng { field: ['error1', 'error2'] }
           Object.keys(error.response.data.errors).forEach(key => {
             const fieldErrors = error.response.data.errors[key];
             // Lấy lỗi đầu tiên cho mỗi field
-            serverErrors[key] = Array.isArray(fieldErrors) ? fieldErrors[0] : fieldErrors;
+            const errorMessage = Array.isArray(fieldErrors) ? fieldErrors[0] : fieldErrors;
+            serverErrors[key] = errorMessage;
+            
+            // Kiểm tra nếu là lỗi unique (đã tồn tại)
+            if (errorMessage.includes('đã được sử dụng') || 
+                errorMessage.includes('already been taken') ||
+                errorMessage.includes('already exists')) {
+              hasUniqueError = true;
+            }
           });
           setErrors(serverErrors);
-          toast.error('Đăng ký thất bại', {
-            description: 'Vui lòng kiểm tra lại thông tin',
-          });
+          
+          // Hiển thị thông báo phù hợp
+          if (hasUniqueError) {
+            toast.error('Thông tin đã tồn tại', {
+              description: 'Email hoặc số điện thoại này đã được sử dụng. Vui lòng sử dụng thông tin khác hoặc đăng nhập.',
+            });
+          } else {
+            toast.error('Đăng ký thất bại', {
+              description: 'Vui lòng kiểm tra lại thông tin đã nhập',
+            });
+          }
         } else {
           const errorMessage = error.response.data?.message || error.response.data?.error || 'Đăng ký thất bại';
           setError(errorMessage);

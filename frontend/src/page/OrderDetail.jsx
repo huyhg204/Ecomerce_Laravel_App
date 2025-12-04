@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { formatCurrency } from '../utils/formatCurrency'
 import { axiosInstance } from '../utils/axiosConfig'
 import { authService } from '../utils/authService'
+import { formatDateTime } from '../utils/dateHelper'
 
 const OrderDetail = () => {
   const navigate = useNavigate()
@@ -287,23 +288,13 @@ const OrderDetail = () => {
     return methodMap[methodPay] || 'Không xác định'
   }
 
-  const formatDate = (dateString) => {
-    if (!dateString) return ''
-    const date = new Date(dateString)
-    return date.toLocaleDateString('vi-VN', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    })
-  }
+  // Sử dụng formatDateTime từ dateHelper (đã import ở trên)
+  const formatDate = formatDateTime
 
   const orderData = order ? (order.order || order) : null
   const orderProducts = order ? (order.products || []) : []
   const finalStatus = orderData ? getFinalStatus(orderData) : null
   const paymentMethod = orderData ? getPaymentMethod(orderData.method_pay) : null
-  const total = orderData ? (orderData.total_order || 0) : 0
 
   // Kiểm tra điều kiện để hiển thị nút xác nhận đơn
   // Điều kiện: status_delivery = 2 (đã giao hàng) — bắt buộc và status_user_order != 1 (chưa hủy) và status_user_order != 0 (chưa xác nhận)
@@ -617,7 +608,7 @@ const OrderDetail = () => {
                   {/* Table Header */}
                   <div style={{ 
                     display: 'grid', 
-                    gridTemplateColumns: '2fr 1fr 1fr 1fr',
+                    gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr',
                     backgroundColor: '#f5f5f5',
                     padding: '15px',
                     borderBottom: '1px solid #e0e0e0',
@@ -625,6 +616,7 @@ const OrderDetail = () => {
                     fontSize: '1.4rem'
                   }}>
                     <div>Sản phẩm</div>
+                    <div style={{ textAlign: 'left' }}>Size</div>
                     <div style={{ textAlign: 'right' }}>Giá</div>
                     <div style={{ textAlign: 'center' }}>Số lượng</div>
                     <div style={{ textAlign: 'right' }}>Tổng tiền</div>
@@ -638,14 +630,17 @@ const OrderDetail = () => {
                         const productImage = product.image_product || ''
                         const quantity = product.quantity_detail || 0
                         const totalDetail = product.total_detail || 0
-                        const unitPrice = quantity > 0 ? totalDetail / quantity : 0
+                        // Lấy giá từ API response
+                        const originalPrice = parseFloat(product.original_price) || 0
+                        const discountPrice = parseFloat(product.discount_price) || (quantity > 0 ? totalDetail / quantity : 0)
+                        const hasDiscount = originalPrice > 0 && originalPrice > discountPrice
 
                         return (
                           <div 
                             key={index} 
                             style={{ 
                               display: 'grid', 
-                              gridTemplateColumns: '2fr 1fr 1fr 1fr',
+                              gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr',
                               padding: '15px',
                               borderBottom: index < orderProducts.length - 1 ? '1px solid #e0e0e0' : 'none',
                               alignItems: 'center'
@@ -654,13 +649,16 @@ const OrderDetail = () => {
                             <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
                               {productImage ? (
                                 <img
-                                  src={productImage}
+                                  src={productImage.startsWith('http') ? productImage : `/${productImage}`}
                                   alt={productName}
                                   style={{
                                     width: '60px',
                                     height: '60px',
                                     objectFit: 'cover',
                                     borderRadius: '5px'
+                                  }}
+                                  onError={(e) => {
+                                    e.target.style.display = 'none'
                                   }}
                                 />
                               ) : (
@@ -682,8 +680,34 @@ const OrderDetail = () => {
                               )}
                               <span style={{ fontSize: '1.4rem' }}>{productName}</span>
                             </div>
+                            <div style={{ textAlign: 'left', fontSize: '1.4rem', color: '#495057' }}>
+                              {product.size || '-'}
+                            </div>
                             <div style={{ textAlign: 'right', fontSize: '1.4rem' }}>
-                              {formatCurrency(unitPrice)}
+                              {hasDiscount ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                                  <span style={{ 
+                                    fontWeight: '700',
+                                    color: '#d32f2f'
+                                  }}>
+                                    {formatCurrency(discountPrice)}
+                                  </span>
+                                  <span style={{ 
+                                    fontSize: '1.2rem',
+                                    color: '#999',
+                                    textDecoration: 'line-through'
+                                  }}>
+                                    {formatCurrency(originalPrice)}
+                                  </span>
+                                </div>
+                              ) : (
+                                <span style={{ 
+                                  fontWeight: '600',
+                                  color: '#1976d2'
+                                }}>
+                                  {formatCurrency(discountPrice)}
+                                </span>
+                              )}
                             </div>
                             <div style={{ textAlign: 'center', fontSize: '1.4rem' }}>
                               {quantity}
@@ -708,15 +732,81 @@ const OrderDetail = () => {
                 marginBottom: '30px',
                 padding: '20px',
                 backgroundColor: '#f9f9f9',
-                borderRadius: '8px',
+                borderRadius: '8px'
+              }}>
+                <h3 style={{ fontSize: '1.8rem', marginBottom: '15px', fontWeight: 'bold' }}>
+                  Tóm tắt đơn hàng
+                </h3>
+                
+                {/* Tính tổng tiền gốc và tiết kiệm từ sản phẩm */}
+                {(() => {
+                  let subtotalOriginal = 0
+                  let subtotalDiscount = 0
+                  let totalSavings = 0
+                  
+                  orderProducts.forEach(product => {
+                    const quantity = product.quantity_detail || 0
+                    const originalPrice = parseFloat(product.original_price) || 0
+                    const discountPrice = parseFloat(product.discount_price) || (product.total_detail ? parseFloat(product.total_detail) / quantity : 0)
+                    
+                    if (originalPrice > 0) {
+                      subtotalOriginal += originalPrice * quantity
+                    }
+                    subtotalDiscount += discountPrice * quantity
+                    if (originalPrice > discountPrice) {
+                      totalSavings += (originalPrice - discountPrice) * quantity
+                    }
+                  })
+                  
+                  // Sử dụng subtotal_order từ order nếu có, nếu không thì dùng subtotalDiscount đã tính
+                  const subtotalFromOrder = parseFloat(orderData.subtotal_order) || subtotalDiscount
+                  const voucherDiscount = parseFloat(orderData.voucher_discount) || 0
+                  const finalTotal = parseFloat(orderData.total_order) || (subtotalFromOrder - voucherDiscount)
+                  
+                  return (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      {subtotalOriginal > 0 && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.4rem', color: '#999' }}>
+                          <span>Tổng giá gốc:</span>
+                          <span style={{ textDecoration: 'line-through' }}>{formatCurrency(subtotalOriginal)}</span>
+                        </div>
+                      )}
+                      
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.4rem' }}>
+                        <span>Tạm tính:</span>
+                        <span>{formatCurrency(subtotalFromOrder)}</span>
+                      </div>
+                      
+                      {totalSavings > 0 && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.4rem', color: '#28a745' }}>
+                          <span>Tiết kiệm từ sản phẩm:</span>
+                          <span>-{formatCurrency(totalSavings)}</span>
+                        </div>
+                      )}
+                      
+                      {voucherDiscount > 0 && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.4rem', color: '#d32f2f' }}>
+                          <span>Giảm giá voucher {orderData.voucher_code ? `(${orderData.voucher_code})` : ''}:</span>
+                          <span>-{formatCurrency(voucherDiscount)}</span>
+                        </div>
+                      )}
+                      
+                      <div style={{ 
+                        marginTop: '10px', 
+                        paddingTop: '15px', 
+                        borderTop: '2px solid #e0e0e0',
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center'
               }}>
-                <span style={{ fontSize: '1.8rem', fontWeight: 'bold' }}>Tổng cộng:</span>
+                        <span style={{ fontSize: '1.8rem', fontWeight: 'bold' }}>Thành tiền:</span>
                 <span style={{ fontSize: '1.8rem', fontWeight: 'bold', color: '#1976d2' }}>
-                  {formatCurrency(total)}
+                          {formatCurrency(finalTotal)}
                 </span>
+                      </div>
+                    </div>
+                  )
+                })()}
               </div>
 
               {/* Action Buttons */}

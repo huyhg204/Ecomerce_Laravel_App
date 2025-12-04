@@ -4,6 +4,7 @@ import { ClipLoader } from 'react-spinners'
 import { toast } from 'sonner'
 import { axiosInstance } from '../../utils/axiosConfig'
 import { formatCurrency } from '../../utils/formatCurrency'
+import { formatDateTime } from '../../utils/dateHelper'
 
 const AdminOrderDetail = () => {
   const { id } = useParams()
@@ -159,17 +160,8 @@ const AdminOrderDetail = () => {
     return { label: 'Không xác định', color: '#6c757d', value: '0' }
   }
 
-  const formatDate = (dateString) => {
-    if (!dateString) return ''
-    const date = new Date(dateString)
-    return date.toLocaleDateString('vi-VN', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    })
-  }
+  // Sử dụng formatDateTime từ dateHelper
+  const formatDate = formatDateTime
 
   if (loading) {
     return (
@@ -838,6 +830,16 @@ const AdminOrderDetail = () => {
                 </th>
                 <th style={{ 
                   padding: '18px 16px', 
+                  textAlign: 'left', 
+                  fontSize: '1.3rem', 
+                  fontWeight: '600',
+                  color: '#495057',
+                  letterSpacing: '0.01em'
+                }}>
+                  Size
+                </th>
+                <th style={{ 
+                  padding: '18px 16px', 
                   textAlign: 'right', 
                   fontSize: '1.3rem', 
                   fontWeight: '600',
@@ -871,7 +873,7 @@ const AdminOrderDetail = () => {
             <tbody>
               {orderDetails.length === 0 ? (
                 <tr>
-                  <td colSpan="4" style={{ 
+                  <td colSpan="5" style={{ 
                     padding: '60px 40px', 
                     textAlign: 'center', 
                     fontSize: '1.5rem', 
@@ -885,7 +887,11 @@ const AdminOrderDetail = () => {
                 orderDetails.map((detail, index) => {
                   const quantity = detail.quantity_detail || 0
                   const totalDetail = detail.total_detail || 0
-                  const unitPrice = quantity > 0 ? totalDetail / quantity : 0
+                  // Lấy giá từ API response
+                  const originalPrice = parseFloat(detail.original_price) || 0
+                  const discountPrice = parseFloat(detail.discount_price) || (quantity > 0 ? totalDetail / quantity : 0)
+                  const hasDiscount = originalPrice > 0 && originalPrice > discountPrice
+                  
                   return (
                     <tr 
                       key={detail.id || index} 
@@ -907,17 +913,61 @@ const AdminOrderDetail = () => {
                         color: '#212529'
                       }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                          {detail.image_product && (
+                            <img
+                              src={detail.image_product.startsWith('http') ? detail.image_product : `/${detail.image_product}`}
+                              alt={detail.name_product}
+                              style={{
+                                width: '50px',
+                                height: '50px',
+                                objectFit: 'cover',
+                                borderRadius: '8px'
+                              }}
+                              onError={(e) => {
+                                e.target.style.display = 'none'
+                              }}
+                            />
+                          )}
                           <span>{detail.name_product}</span>
                         </div>
                       </td>
                       <td style={{ 
                         padding: '16px', 
-                        textAlign: 'right', 
                         fontSize: '1.4rem',
-                        fontWeight: '600',
-                        color: '#1976d2'
+                        fontWeight: '500',
+                        color: '#495057'
                       }}>
-                        {formatCurrency(unitPrice)}
+                        {detail.size || '-'}
+                      </td>
+                      <td style={{ 
+                        padding: '16px', 
+                        textAlign: 'right', 
+                        fontSize: '1.4rem'
+                      }}>
+                        {hasDiscount ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                            <span style={{ 
+                              fontWeight: '700',
+                              color: '#d32f2f'
+                            }}>
+                              {formatCurrency(discountPrice)}
+                            </span>
+                            <span style={{ 
+                              fontSize: '1.2rem',
+                              color: '#999',
+                              textDecoration: 'line-through'
+                            }}>
+                              {formatCurrency(originalPrice)}
+                            </span>
+                          </div>
+                        ) : (
+                          <span style={{ 
+                            fontWeight: '600',
+                            color: '#1976d2'
+                          }}>
+                            {formatCurrency(discountPrice)}
+                          </span>
+                        )}
                       </td>
                       <td style={{ 
                         padding: '16px', 
@@ -943,6 +993,94 @@ const AdminOrderDetail = () => {
               )}
             </tbody>
           </table>
+        </div>
+        
+        {/* Order Summary */}
+        <div style={{ 
+          marginTop: '32px',
+          padding: '24px',
+          backgroundColor: '#f8f9fa',
+          borderRadius: '12px',
+          border: '1px solid #e9ecef'
+        }}>
+          <h3 style={{ 
+            fontSize: '2rem', 
+            marginBottom: '20px', 
+            fontWeight: '700',
+            color: '#1a1a1a'
+          }}>
+            Tóm tắt đơn hàng
+          </h3>
+          
+          {/* Tính tổng tiền gốc và tiết kiệm từ sản phẩm */}
+          {(() => {
+            let subtotalOriginal = 0
+            let subtotalDiscount = 0
+            let totalSavings = 0
+            
+            orderDetails.forEach(detail => {
+              const quantity = detail.quantity_detail || 0
+              const originalPrice = parseFloat(detail.original_price) || 0
+              const discountPrice = parseFloat(detail.discount_price) || (detail.total_detail ? parseFloat(detail.total_detail) / quantity : 0)
+              
+              if (originalPrice > 0) {
+                subtotalOriginal += originalPrice * quantity
+              }
+              subtotalDiscount += discountPrice * quantity
+              if (originalPrice > discountPrice) {
+                totalSavings += (originalPrice - discountPrice) * quantity
+              }
+            })
+            
+            // Sử dụng subtotal_order từ order nếu có, nếu không thì dùng subtotalDiscount đã tính
+            const subtotalFromOrder = parseFloat(orderData.subtotal_order) || subtotalDiscount
+            const voucherDiscount = parseFloat(orderData.voucher_discount) || 0
+            const finalTotal = parseFloat(orderData.total_order) || (subtotalFromOrder - voucherDiscount)
+            
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {subtotalOriginal > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.4rem', color: '#999' }}>
+                    <span>Tổng giá gốc:</span>
+                    <span style={{ textDecoration: 'line-through' }}>{formatCurrency(subtotalOriginal)}</span>
+                  </div>
+                )}
+                
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.4rem' }}>
+                  <span>Tạm tính:</span>
+                  <span>{formatCurrency(subtotalFromOrder)}</span>
+                </div>
+                
+                {totalSavings > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.4rem', color: '#28a745' }}>
+                    <span>Tiết kiệm từ sản phẩm:</span>
+                    <span>-{formatCurrency(totalSavings)}</span>
+                  </div>
+                )}
+                
+                {voucherDiscount > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.4rem', color: '#d32f2f' }}>
+                    <span>Giảm giá voucher {orderData.voucher_code ? `(${orderData.voucher_code})` : ''}:</span>
+                    <span>-{formatCurrency(voucherDiscount)}</span>
+                  </div>
+                )}
+                
+                <div style={{ 
+                  marginTop: '10px', 
+                  paddingTop: '15px', 
+                  borderTop: '2px solid #e0e0e0',
+                  display: 'flex', 
+                  justifyContent: 'space-between', 
+                  alignItems: 'center'
+                }}>
+                  <span style={{ fontSize: '1.8rem', fontWeight: 'bold' }}>Thành tiền:</span>
+                  <span style={{ fontSize: '1.8rem', fontWeight: 'bold', color: '#1976d2' }}>
+                    {formatCurrency(finalTotal)}
+                  </span>
+                </div>
+              </div>
+            )
+          })()}
         </div>
       </div>
     </div>

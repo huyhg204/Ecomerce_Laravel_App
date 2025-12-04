@@ -30,6 +30,9 @@ class ReviewController extends Controller
                         'reviews.product_id',
                         'reviews.rating',
                         'reviews.content',
+                        'reviews.admin_reply',
+                        'reviews.status',
+                        'reviews.admin_replied_at',
                         'reviews.created_at',
                         'reviews.updated_at',
                         'users.name as user_name',
@@ -52,6 +55,11 @@ class ReviewController extends Controller
                 // Lọc theo rating
                 if ($request->has('rating') && $request->rating) {
                     $query->where('reviews.rating', $request->rating);
+                }
+
+                // Lọc theo status (0: Ẩn, 1: Hiển thị)
+                if ($request->has('status') && $request->status !== null && $request->status !== '') {
+                    $query->where('reviews.status', $request->status);
                 }
 
                 // Lọc theo sản phẩm
@@ -90,6 +98,9 @@ class ReviewController extends Controller
                     'reviews.product_id',
                     'reviews.rating',
                     'reviews.content',
+                    'reviews.admin_reply',
+                    'reviews.status',
+                    'reviews.admin_replied_at',
                     'reviews.created_at',
                     'users.name as user_name',
                     'users.email as user_email',
@@ -122,6 +133,9 @@ class ReviewController extends Controller
                     'reviews.product_id',
                     'reviews.rating',
                     'reviews.content',
+                    'reviews.admin_reply',
+                    'reviews.status',
+                    'reviews.admin_replied_at',
                     'reviews.created_at',
                     'reviews.updated_at',
                     'users.name as user_name',
@@ -152,7 +166,94 @@ class ReviewController extends Controller
     }
 
     /**
-     * Xóa đánh giá (Admin có quyền xóa bất kỳ)
+     * Ẩn/Hiện đánh giá (Admin - không xóa, chỉ ẩn)
+     */
+    public function toggleStatus($id, Request $request)
+    {
+        try {
+            $review = DB::table('reviews')->where('id', $id)->first();
+            
+            if (!$review) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Không tìm thấy đánh giá'
+                ], 404);
+            }
+
+            $newStatus = $review->status == 1 ? 0 : 1;
+            
+            DB::table('reviews')
+                ->where('id', $id)
+                ->update([
+                    'status' => $newStatus,
+                    'updated_at' => now()
+                ]);
+            
+            // Clear cache nếu có
+            Cache::forget('product_reviews_' . $review->product_id);
+            
+            return response()->json([
+                'status' => 'success',
+                'message' => $newStatus == 1 ? 'Đã hiển thị đánh giá' : 'Đã ẩn đánh giá',
+                'data' => ['status' => $newStatus]
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Không thể thay đổi trạng thái đánh giá: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Admin trả lời đánh giá
+     */
+    public function reply($id, Request $request)
+    {
+        try {
+            $adminReply = $request->input('admin_reply');
+            
+            if (!$adminReply || trim($adminReply) === '') {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Vui lòng nhập nội dung phản hồi'
+                ], 400);
+            }
+
+            $review = DB::table('reviews')->where('id', $id)->first();
+            
+            if (!$review) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Không tìm thấy đánh giá'
+                ], 404);
+            }
+
+            DB::table('reviews')
+                ->where('id', $id)
+                ->update([
+                    'admin_reply' => trim($adminReply),
+                    'admin_replied_at' => now(),
+                    'updated_at' => now()
+                ]);
+            
+            // Clear cache nếu có
+            Cache::forget('product_reviews_' . $review->product_id);
+            
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Đã thêm phản hồi thành công'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Không thể thêm phản hồi: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Xóa đánh giá (Admin có quyền xóa bất kỳ) - Giữ lại để tương thích
      */
     public function destroy($id, Request $request)
     {
@@ -197,10 +298,11 @@ class ReviewController extends Controller
     public function statistics(Request $request)
     {
         try {
-            $totalReviews = DB::table('reviews')->count();
-            $avgRating = DB::table('reviews')->avg('rating');
+            $totalReviews = DB::table('reviews')->where('status', 1)->count();
+            $avgRating = DB::table('reviews')->where('status', 1)->avg('rating');
             
             $ratingDistribution = DB::table('reviews')
+                ->where('status', 1)
                 ->select('rating', DB::raw('count(*) as count'))
                 ->groupBy('rating')
                 ->orderBy('rating', 'desc')
@@ -213,6 +315,7 @@ class ReviewController extends Controller
                     'reviews.id',
                     'reviews.rating',
                     'reviews.content',
+                    'reviews.status',
                     'reviews.created_at',
                     'users.name as user_name',
                     'products.name_product as product_name'

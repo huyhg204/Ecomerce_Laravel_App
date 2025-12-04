@@ -5,6 +5,7 @@ import { FaEye, FaSearch, FaChevronLeft, FaChevronRight } from 'react-icons/fa'
 import { toast } from 'sonner'
 import { axiosInstance } from '../../utils/axiosConfig'
 import { formatCurrency } from '../../utils/formatCurrency'
+import { formatDateOnly } from '../../utils/dateHelper'
 
 const AdminOrders = () => {
   const [orders, setOrders] = useState([])
@@ -92,15 +93,8 @@ const AdminOrders = () => {
     return getOrderStatus(order.status_order)
   }
 
-  const formatDate = (dateString) => {
-    if (!dateString) return ''
-    const date = new Date(dateString)
-    return date.toLocaleDateString('vi-VN', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-    })
-  }
+  // Sử dụng formatDateOnly từ dateHelper (chỉ hiển thị ngày, không có giờ)
+  const formatDate = formatDateOnly
 
   // Đảm bảo orders luôn là mảng
   const safeOrders = useMemo(() => {

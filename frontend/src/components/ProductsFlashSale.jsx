@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { toast } from 'sonner'
 import { ClipLoader } from 'react-spinners'
 import { Swiper, SwiperSlide } from 'swiper/react'
 import { Pagination } from 'swiper/modules'
@@ -9,9 +8,6 @@ import 'swiper/css/pagination'
 import { FaHeart, FaEye, FaStar } from 'react-icons/fa'
 import { formatCurrency } from '../utils/formatCurrency'
 import { axiosInstance } from '../utils/axiosConfig'
-import { cartService } from '../utils/cartService'
-import { authService } from '../utils/authService'
-import { useNavigate } from 'react-router-dom'
 
 const HeartIcon = () => <FaHeart className="card_top_icon" />
 
@@ -20,7 +16,6 @@ const EyeIcon = () => <FaEye className="card_top_icon" />
 const StarIcon = () => <FaStar className="w-6 h-6" />
 
 const ProductsFlashSale = () => {
-  const navigate = useNavigate();
   const [products, setProducts] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -51,13 +46,26 @@ const ProductsFlashSale = () => {
         const productsList = Array.isArray(data) ? data : (data?.products || [])
         // Chỉ lấy sản phẩm đang hoạt động (status_product === 0)
         const activeProducts = productsList.filter(product => product.status_product === 0)
-        // Lấy 6 sản phẩm đầu tiên cho flash sale
-        setProducts(activeProducts.slice(0, 6).map(product => ({
+        // Lấy 6 sản phẩm đầu tiên cho flash sale (ưu tiên sản phẩm có giảm giá)
+        const sortedProducts = activeProducts.sort((a, b) => {
+          const aHasDiscount = a.discount_percent > 0
+          const bHasDiscount = b.discount_percent > 0
+          if (aHasDiscount && !bHasDiscount) return -1
+          if (!aHasDiscount && bHasDiscount) return 1
+          return 0
+        })
+        
+        setProducts(sortedProducts.slice(0, 6).map(product => ({
           id: product.id,
           name_product: product.name_product,
-          price_product: product.price_product || 0,
+          price_product: product.discount_price || product.price_product || 0,
+          original_price: product.original_price,
+          discount_price: product.discount_price,
+          discount_percent: product.discount_percent,
           image_product: product.image_product || '',
-          discount: product.discount || '-20%',
+          discount: product.discount_percent ? `-${product.discount_percent}%` : null,
+          reviews_count: product.reviews_count || 0,
+          average_rating: product.average_rating || 0,
         })))
       } else {
         setProducts([])
@@ -181,42 +189,43 @@ const ProductsFlashSale = () => {
                       <Link to={`/products/${product.id}`} className="card_title_link">
                         <h3 className="card_title">{product.name_product}</h3>
                       </Link>
-                      <p className="card_price">{formatCurrency(product.price_product)}</p>
+                      <div className="card_price_wrapper" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        {product.original_price && product.original_price > (product.discount_price || product.price_product) ? (
+                          <>
+                            <p className="card_price" style={{ color: '#dc3545', margin: 0, fontWeight: 'bold' }}>
+                              {formatCurrency(product.discount_price || product.price_product)}
+                            </p>
+                            <p style={{ 
+                              fontSize: '1.2rem', 
+                              color: '#999', 
+                              textDecoration: 'line-through',
+                              margin: 0
+                            }}>
+                              {formatCurrency(product.original_price)}
+                            </p>
+                          </>
+                        ) : (
+                          <p className="card_price" style={{ margin: 0 }}>{formatCurrency(product.price_product)}</p>
+                        )}
+                      </div>
                       <div className="card_ratings">
                         <div className="card_stars">
                           {Array.from({ length: 5 }).map((_, index) => (
-                            <StarIcon key={index} />
+                            <StarIcon 
+                              key={index}
+                              className={index < Math.floor(product.average_rating || 0) ? 'active' : ''}
+                            />
                           ))}
                         </div>
-                        <p className="card_rating_numbers">(88)</p>
+                        <p className="card_rating_numbers">({product.reviews_count || 0})</p>
                       </div>
-                      <button
+                      <Link
+                        to={`/products/${product.id}`}
                         className="add_to_cart"
-                        onClick={async (e) => {
-                          e.preventDefault()
-                          e.stopPropagation()
-                          
-                          if (!authService.isAuthenticated()) {
-                            if (window.confirm('Bạn cần đăng nhập để thêm vào giỏ hàng. Đi đến trang đăng nhập?')) {
-                              navigate('/login')
-                            }
-                            return
-                          }
-
-                          try {
-                            await cartService.addToCart(product.id, 1)
-                            toast.success('Đã thêm vào giỏ hàng!', {
-                              description: `${product.name_product} đã được thêm vào giỏ hàng.`,
-                            })
-                          } catch (error) {
-                            toast.error('Không thể thêm vào giỏ hàng', {
-                              description: error.message || 'Vui lòng thử lại sau.',
-                            })
-                          }
-                        }}
+                        style={{ textDecoration: 'none', display: 'block', textAlign: 'center' }}
                       >
-                        Thêm vào giỏ
-                      </button>
+                        Xem chi tiết
+                      </Link>
                     </div>
                   </div>
                 </SwiperSlide>

@@ -1,12 +1,9 @@
 import React, { useState, useMemo, useEffect } from 'react'
-import { Link, useSearchParams, useNavigate } from 'react-router-dom'
-import { toast } from 'sonner'
+import { Link, useSearchParams } from 'react-router-dom'
 import { ClipLoader } from 'react-spinners'
 import { FaStar, FaHeart, FaEye, FaChevronLeft, FaChevronRight } from 'react-icons/fa'
 import { formatCurrency } from '../utils/formatCurrency'
 import { axiosInstance } from '../utils/axiosConfig'
-import { cartService } from '../utils/cartService'
-import { authService } from '../utils/authService'
 
 // const brands = ['Tất cả', 'Apple', 'Samsung', 'ASUS', 'Canon', 'HAVIT', 'JBL', 'Sony', 'Logitech', 'Xbox', 'RGB', 'IPS', 'AK', 'Gaming']
 const priceRanges = [
@@ -20,7 +17,6 @@ const priceRanges = [
 ]
 
 const ProductList = () => {
-  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const categoryParam = searchParams.get('category')
   const searchParam = searchParams.get('search')
@@ -103,13 +99,16 @@ const ProductList = () => {
       setAllProducts(activeProducts.map(product => ({
         id: product.id,
         title: product.name_product,
-        price: product.price_product || 0,
+        price_product: product.discount_price || product.price_product || 0,
+        original_price: product.original_price,
+        discount_price: product.discount_price,
+        discount_percent: product.discount_percent,
         image: product.image_product || '',
         category: product.name_category || product.category?.name || 'Uncategorized',
         brand: product.brand || '',
-        rating: product.rating || 4.0,
+        rating: product.average_rating || 0,
         reviews: product.reviews_count || 0,
-        discount: product.discount || '',
+        discount: product.discount_percent ? `-${product.discount_percent}%` : null,
       })))
       
       if (process.env.NODE_ENV === 'development') {
@@ -242,13 +241,16 @@ const ProductList = () => {
       setAllProducts(activeProducts.map(product => ({
         id: product.id,
         title: product.name_product,
-        price: product.price_product || 0,
+        price_product: product.discount_price || product.price_product || 0,
+        original_price: product.original_price,
+        discount_price: product.discount_price,
+        discount_percent: product.discount_percent,
         image: product.image_product || '',
         category: product.name_category || product.category?.name || 'Uncategorized',
         brand: product.brand || '',
-        rating: product.rating || 4.0,
+        rating: product.average_rating || 0,
         reviews: product.reviews_count || 0,
-        discount: product.discount || '',
+        discount: product.discount_percent ? `-${product.discount_percent}%` : null,
       })))
       
       if (process.env.NODE_ENV === 'development') {
@@ -311,7 +313,7 @@ const ProductList = () => {
     // Filter by price range
     if (selectedPriceRange.label !== 'Tất cả') {
       filtered = filtered.filter((p) => {
-        const price = Number(p.price) || 0
+        const price = Number(p.price_product) || 0
         if (selectedPriceRange.max === Infinity) {
           return price >= selectedPriceRange.min
         }
@@ -322,10 +324,10 @@ const ProductList = () => {
     // Sort products
     switch (sortBy) {
       case 'price-low':
-        filtered.sort((a, b) => a.price - b.price)
+        filtered.sort((a, b) => a.price_product - b.price_product)
         break
       case 'price-high':
-        filtered.sort((a, b) => b.price - a.price)
+        filtered.sort((a, b) => b.price_product - a.price_product)
         break
       case 'rating':
         filtered.sort((a, b) => b.rating - a.rating)
@@ -665,7 +667,25 @@ const ProductList = () => {
                         <Link to={`/products/${product.id}`} className="card_title_link">
                           <h3 className="card_title">{product.title}</h3>
                         </Link>
-                        <p className="card_price">{formatCurrency(product.price)}</p>
+                        <div className="card_price_wrapper" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                          {product.original_price && product.original_price > (product.discount_price || product.price_product) ? (
+                            <>
+                              <p className="card_price" style={{ color: '#dc3545', margin: 0, fontWeight: 'bold' }}>
+                                {formatCurrency(product.discount_price || product.price_product)}
+                              </p>
+                              <p style={{ 
+                                fontSize: '1.2rem', 
+                                color: '#999', 
+                                textDecoration: 'line-through',
+                                margin: 0
+                              }}>
+                                {formatCurrency(product.original_price)}
+                              </p>
+                            </>
+                          ) : (
+                            <p className="card_price" style={{ margin: 0 }}>{formatCurrency(product.price_product)}</p>
+                          )}
+                        </div>
                         <div className="card_ratings">
                           <div className="card_stars">
                             {Array.from({ length: 5 }).map((_, index) => (
@@ -677,33 +697,13 @@ const ProductList = () => {
                           </div>
                           <p className="card_rating_numbers">({product.reviews})</p>
                         </div>
-                        <button 
+                        <Link
+                          to={`/products/${product.id}`}
                           className="add_to_cart"
-                          onClick={async (e) => {
-                            e.preventDefault()
-                            e.stopPropagation()
-                            
-                            if (!authService.isAuthenticated()) {
-                              if (window.confirm('Bạn cần đăng nhập để thêm vào giỏ hàng. Đi đến trang đăng nhập?')) {
-                                navigate('/login')
-                              }
-                              return
-                            }
-
-                            try {
-                              await cartService.addToCart(product.id, 1)
-                              toast.success('Đã thêm vào giỏ hàng!', {
-                                description: `${product.name_product} đã được thêm vào giỏ hàng.`,
-                              })
-                            } catch (error) {
-                              toast.error('Không thể thêm vào giỏ hàng', {
-                                description: error.message || 'Vui lòng thử lại sau.',
-                              })
-                            }
-                          }}
+                          style={{ textDecoration: 'none', display: 'block', textAlign: 'center' }}
                         >
-                          Thêm vào giỏ
-                        </button>
+                          Xem chi tiết
+                        </Link>
                       </div>
                     </div>
                   ))

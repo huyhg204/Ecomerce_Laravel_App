@@ -52,21 +52,21 @@ const AdminUsers = () => {
   }
 
   const handleDelete = async (id) => {
-    if (!window.confirm('Bạn có chắc muốn xóa người dùng này?')) return
+    if (!window.confirm('Bạn có chắc muốn khóa người dùng này?')) return
     
     try {
-      // Optimistic update: Xóa ngay khỏi UI
+      // Optimistic update: khóa ngay khỏi UI
       setUsers(prevUsers => prevUsers.filter(user => user.id !== id))
       
       await axiosInstance.delete(`/admin/users/${id}`)
-      toast.success('Xóa người dùng thành công')
+      toast.success('khóa người dùng thành công')
       
       // Refresh dữ liệu trong background (silent mode - không hiển thị loading)
       fetchUsers(true)
     } catch (error) {
       // Rollback nếu có lỗi
       fetchUsers(true)
-      toast.error('Xóa người dùng thất bại')
+      toast.error('khóa người dùng thất bại')
       console.error('Lỗi:', error)
     }
   }
@@ -293,7 +293,7 @@ const AdminUsers = () => {
                         color: user.status_user !== 0 ? '#721c24' : '#155724',
                         display: 'inline-block'
                       }}>
-                        {user.status_user !== 0 ? 'Đã xóa' : 'Hoạt động'}
+                        {user.status_user !== 0 ? 'Đã khóa' : 'Hoạt động'}
                       </span>
                     </td>
                     <td style={{ padding: '15px', textAlign: 'center' }}>
@@ -357,7 +357,7 @@ const AdminUsers = () => {
                             e.target.style.boxShadow = '0 2px 4px rgba(220, 53, 69, 0.2)'
                           }}
                         >
-                          <FaTrash /> Xóa
+                          <FaTrash /> khóa
                         </button>
                       )}
                     </td>

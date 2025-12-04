@@ -14,6 +14,8 @@ use App\Http\Controllers\admin\CategoryController;
 use App\Http\Controllers\admin\UserController;
 use App\Http\Controllers\admin\RevenueController;
 use App\Http\Controllers\admin\ReviewController as AdminReviewController;
+use App\Http\Controllers\admin\VoucherController;
+use App\Http\Controllers\admin\BannerController;
 use App\Http\Middleware\checkRoleUser;
 use App\Http\Middleware\checkRoleAdmin;
 use App\Http\Middleware\CorsMiddleware; // Đảm bảo đã import Cors
@@ -31,6 +33,9 @@ use App\Http\Middleware\CorsMiddleware; // Đảm bảo đã import Cors
 Route::middleware([CorsMiddleware::class])->group(function () {
     Route::post('/login', [AuthController::class, 'login']);
     Route::post('/register', [AuthController::class, 'register']);
+    Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
+    Route::post('/verify-otp', [AuthController::class, 'verifyOTP']);
+    Route::post('/reset-password', [AuthController::class, 'resetPassword']);
 
     Route::get('/home', [HomeController::class, 'index']);
     Route::get('/categories', [CategoryController::class, 'index']); // Lấy danh mục public
@@ -43,6 +48,12 @@ Route::middleware([CorsMiddleware::class])->group(function () {
     
     // Public Reviews - Xem đánh giá sản phẩm (không cần đăng nhập)
     Route::get('/product/{id}/reviews', [ReviewController::class, 'index']);
+    
+    // Voucher - Validate voucher (public)
+    Route::post('/voucher/validate', [VoucherController::class, 'validateVoucher']);
+    
+    // Banners - Lấy banner public (cho frontend)
+    Route::get('/banners', [BannerController::class, 'index']);
 });
 
 // --------------------------------------------------------------------------
@@ -94,6 +105,7 @@ Route::middleware(['auth:sanctum', CorsMiddleware::class])->group(function () {
 
         // Products
         Route::get('/products', [ProductController::class, 'index']);
+        Route::get('/products/{id}', [ProductController::class, 'edit']); // Lấy thông tin sản phẩm để edit
         Route::post('/products', [ProductController::class, 'store']);
         Route::put('/products/{id}', [ProductController::class, 'update']);
         Route::post('/products/{id}', [ProductController::class, 'update']); // Hỗ trợ POST với _method=PUT cho FormData
@@ -126,7 +138,26 @@ Route::middleware(['auth:sanctum', CorsMiddleware::class])->group(function () {
         // Reviews
         Route::get('/reviews', [AdminReviewController::class, 'index']);
         Route::get('/reviews/{id}', [AdminReviewController::class, 'show']);
+        Route::post('/reviews/{id}/reply', [AdminReviewController::class, 'reply']); // Admin trả lời đánh giá
+        Route::put('/reviews/{id}/toggle-status', [AdminReviewController::class, 'toggleStatus']); // Ẩn/Hiện đánh giá
+        Route::post('/reviews/{id}/toggle-status', [AdminReviewController::class, 'toggleStatus']); // Hỗ trợ POST với _method=PUT
         Route::delete('/reviews/{id}', [AdminReviewController::class, 'destroy']);
         Route::get('/reviews-statistics', [AdminReviewController::class, 'statistics']);
+
+        // Vouchers
+        Route::get('/vouchers', [VoucherController::class, 'index']);
+        Route::post('/vouchers', [VoucherController::class, 'store']);
+        Route::get('/vouchers/{id}', [VoucherController::class, 'show']);
+        Route::put('/vouchers/{id}', [VoucherController::class, 'update']);
+        Route::post('/vouchers/{id}', [VoucherController::class, 'update']); // Hỗ trợ POST với _method=PUT
+        Route::delete('/vouchers/{id}', [VoucherController::class, 'destroy']);
+
+        // Banners
+        Route::get('/banners', [BannerController::class, 'index']);
+        Route::post('/banners', [BannerController::class, 'store']);
+        Route::get('/banners/{id}', [BannerController::class, 'show']);
+        Route::put('/banners/{id}', [BannerController::class, 'update']);
+        Route::post('/banners/{id}', [BannerController::class, 'update']); // Hỗ trợ POST với _method=PUT
+        Route::delete('/banners/{id}', [BannerController::class, 'destroy']);
     });
 });

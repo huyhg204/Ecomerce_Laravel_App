@@ -4,16 +4,26 @@ import { authService } from './authService';
 
 export const cartService = {
   // Thêm sản phẩm vào giỏ hàng
-  addToCart: async (productId, quantity = 1) => {
+  addToCart: async (productId, quantity = 1, options = {}) => {
     if (!authService.isAuthenticated()) {
       throw new Error('Vui lòng đăng nhập để thêm sản phẩm vào giỏ hàng');
     }
 
     try {
-      const response = await axiosInstance.post('/cart/add', {
+      const payload = {
         product_id: productId,
-        quantity: quantity,
-      });
+        quantity_item: quantity,
+      };
+      
+      // Thêm size và product_attribute_id nếu có
+      if (options.size) {
+        payload.size = options.size;
+      }
+      if (options.product_attribute_id) {
+        payload.product_attribute_id = options.product_attribute_id;
+      }
+      
+      const response = await axiosInstance.post('/cart/add', payload);
       
       if (response.data.status === 'success') {
         return { success: true, message: 'Đã thêm vào giỏ hàng' };

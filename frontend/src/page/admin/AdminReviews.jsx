@@ -1,15 +1,20 @@
 import { useState, useEffect, useMemo } from 'react'
 import { ClipLoader } from 'react-spinners'
-import { FaTrash, FaSearch, FaChevronLeft, FaChevronRight, FaStar } from 'react-icons/fa'
+import { FaTrash, FaSearch, FaChevronLeft, FaChevronRight, FaStar, FaReply, FaEye, FaEyeSlash } from 'react-icons/fa'
 import { toast } from 'sonner'
 import { axiosInstance } from '../../utils/axiosConfig'
+import { formatDateOnly } from '../../utils/dateHelper'
 
 const AdminReviews = () => {
   const [reviews, setReviews] = useState([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
   const [ratingFilter, setRatingFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
+  const [replyingTo, setReplyingTo] = useState(null)
+  const [replyText, setReplyText] = useState('')
+  const [togglingStatus, setTogglingStatus] = useState(null)
   const [pagination, setPagination] = useState({
     current_page: 1,
     per_page: 20,
@@ -21,7 +26,19 @@ const AdminReviews = () => {
   useEffect(() => {
     fetchReviews()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, ratingFilter, searchTerm])
+  }, [currentPage, ratingFilter, statusFilter, searchTerm])
+
+  // Load reply text khi mở modal
+  useEffect(() => {
+    if (replyingTo) {
+      const review = reviews.find(r => r.id === replyingTo)
+      if (review && review.admin_reply) {
+        setReplyText(review.admin_reply)
+      } else {
+        setReplyText('')
+      }
+    }
+  }, [replyingTo, reviews])
 
   // Đảm bảo reviews luôn là mảng
   useEffect(() => {
@@ -48,6 +65,10 @@ const AdminReviews = () => {
       
       if (ratingFilter) {
         params.rating = ratingFilter
+      }
+      
+      if (statusFilter !== '') {
+        params.status = statusFilter
       }
       
       const response = await axiosInstance.get('/admin/reviews', { params })
@@ -94,6 +115,54 @@ const AdminReviews = () => {
     }
   }
 
+  const handleReply = async (reviewId) => {
+    if (!replyText.trim()) {
+      toast.error('Vui lòng nhập nội dung phản hồi')
+      return
+    }
+
+    try {
+      await axiosInstance.post(`/admin/reviews/${reviewId}/reply`, {
+        admin_reply: replyText.trim()
+      })
+      
+      toast.success('Đã thêm phản hồi thành công')
+      setReplyingTo(null)
+      setReplyText('')
+      fetchReviews(true)
+    } catch (error) {
+      toast.error('Không thể thêm phản hồi')
+      console.error('Lỗi:', error)
+    }
+  }
+
+  const handleToggleStatus = async (reviewId, currentStatus) => {
+    try {
+      setTogglingStatus(reviewId)
+      
+      // Optimistic update
+      setReviews(prevReviews => 
+        prevReviews.map(review => 
+          review.id === reviewId 
+            ? { ...review, status: currentStatus === 1 ? 0 : 1 }
+            : review
+        )
+      )
+      
+      await axiosInstance.put(`/admin/reviews/${reviewId}/toggle-status`)
+      
+      toast.success(currentStatus === 1 ? 'Đã ẩn đánh giá' : 'Đã hiển thị đánh giá')
+      fetchReviews(true)
+    } catch (error) {
+      // Rollback
+      fetchReviews(true)
+      toast.error('Không thể thay đổi trạng thái đánh giá')
+      console.error('Lỗi:', error)
+    } finally {
+      setTogglingStatus(null)
+    }
+  }
+
   // Đảm bảo reviews luôn là mảng
   const safeReviews = useMemo(() => {
     if (!reviews) return []
@@ -107,7 +176,7 @@ const AdminReviews = () => {
   // Reset to page 1 when search changes
   useEffect(() => {
     setCurrentPage(1)
-  }, [searchTerm, ratingFilter])
+  }, [searchTerm, ratingFilter, statusFilter])
 
   // Pagination handlers
   const handlePageChange = (page) => {
@@ -184,18 +253,9 @@ const AdminReviews = () => {
     )
   }
 
-  // Format date
-  const formatDate = (dateString) => {
-    if (!dateString) return '-'
-    const date = new Date(dateString)
-    return date.toLocaleDateString('vi-VN', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit'
-    })
-  }
+  // Format date - sử dụng utility function
+  // Sử dụng formatDateOnly từ dateHelper (chỉ hiển thị ngày, không có giờ)
+  const formatDate = formatDateOnly
 
   return (
     <div>
@@ -261,6 +321,24 @@ const AdminReviews = () => {
           <option value="2">2 sao</option>
           <option value="1">1 sao</option>
         </select>
+
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          style={{
+            padding: '12px 15px',
+            fontSize: '1.4rem',
+            border: '1px solid #e0e0e0',
+            borderRadius: '5px',
+            outline: 'none',
+            cursor: 'pointer',
+            minWidth: '150px'
+          }}
+        >
+          <option value="">Tất cả trạng thái</option>
+          <option value="1">Đang hiển thị</option>
+          <option value="0">Đã ẩn</option>
+        </select>
       </div>
 
       {/* Reviews Table */}
@@ -282,6 +360,8 @@ const AdminReviews = () => {
                 <th style={{ padding: '15px', textAlign: 'left', fontSize: '1.4rem', fontWeight: 'bold' }}>Sản phẩm</th>
                 <th style={{ padding: '15px', textAlign: 'center', fontSize: '1.4rem', fontWeight: 'bold' }}>Đánh giá</th>
                 <th style={{ padding: '15px', textAlign: 'left', fontSize: '1.4rem', fontWeight: 'bold' }}>Nội dung</th>
+                <th style={{ padding: '15px', textAlign: 'left', fontSize: '1.4rem', fontWeight: 'bold' }}>Phản hồi Admin</th>
+                <th style={{ padding: '15px', textAlign: 'center', fontSize: '1.4rem', fontWeight: 'bold' }}>Trạng thái</th>
                 <th style={{ padding: '15px', textAlign: 'left', fontSize: '1.4rem', fontWeight: 'bold' }}>Ngày tạo</th>
                 <th style={{ padding: '15px', textAlign: 'center', fontSize: '1.4rem', fontWeight: 'bold' }}>Thao tác</th>
               </tr>
@@ -289,7 +369,7 @@ const AdminReviews = () => {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan="7" style={{ 
+                  <td colSpan="9" style={{ 
                     padding: '60px 40px', 
                     textAlign: 'center', 
                     fontSize: '1.5rem', 
@@ -309,7 +389,7 @@ const AdminReviews = () => {
                 </tr>
               ) : safeReviews.length === 0 ? (
                 <tr>
-                  <td colSpan="7" style={{ padding: '40px', textAlign: 'center', fontSize: '1.4rem', color: '#666' }}>
+                  <td colSpan="9" style={{ padding: '40px', textAlign: 'center', fontSize: '1.4rem', color: '#666' }}>
                     Không có đánh giá nào
                   </td>
                 </tr>
@@ -319,7 +399,8 @@ const AdminReviews = () => {
                     key={review.id}
                     style={{
                       borderBottom: '1px solid #e0e0e0',
-                      transition: 'background-color 0.2s'
+                      transition: 'background-color 0.2s',
+                      opacity: review.status === 0 ? 0.6 : 1
                     }}
                     onMouseEnter={(e) => {
                       const row = e.currentTarget
@@ -376,40 +457,145 @@ const AdminReviews = () => {
                         {review.content || '(Không có nội dung)'}
                       </div>
                     </td>
+                    <td style={{ padding: '15px', fontSize: '1.4rem', maxWidth: '300px' }}>
+                      {review.admin_reply ? (
+                        <div style={{
+                          backgroundColor: '#e3f2fd',
+                          padding: '10px',
+                          borderRadius: '8px',
+                          border: '1px solid #bbdefb'
+                        }}>
+                          <div style={{ 
+                            fontSize: '1.2rem', 
+                            fontWeight: '600', 
+                            color: '#1976d2',
+                            marginBottom: '5px'
+                          }}>
+                            Phản hồi từ Admin:
+                          </div>
+                          <div style={{ color: '#333' }}>
+                            {review.admin_reply}
+                          </div>
+                          {review.admin_replied_at && (
+                            <div style={{ 
+                              fontSize: '1.1rem', 
+                              color: '#666', 
+                              marginTop: '5px',
+                              fontStyle: 'italic'
+                            }}>
+                              {formatDateOnly(review.admin_replied_at)}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <span style={{ color: '#999', fontStyle: 'italic' }}>Chưa có phản hồi</span>
+                      )}
+                    </td>
+                    <td style={{ padding: '15px', textAlign: 'center' }}>
+                      <span style={{
+                        padding: '6px 12px',
+                        borderRadius: '6px',
+                        fontSize: '1.2rem',
+                        fontWeight: '600',
+                        backgroundColor: review.status === 1 ? '#d4edda' : '#f8d7da',
+                        color: review.status === 1 ? '#155724' : '#721c24'
+                      }}>
+                        {review.status === 1 ? 'Hiển thị' : 'Đã ẩn'}
+                      </span>
+                    </td>
                     <td style={{ padding: '15px', fontSize: '1.3rem', color: '#666' }}>
                       {formatDate(review.created_at)}
                     </td>
                     <td style={{ padding: '15px', textAlign: 'center' }}>
-                      <button
-                        onClick={() => handleDelete(review.id)}
-                        style={{
-                          padding: '8px 14px',
-                          backgroundColor: '#dc3545',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '8px',
-                          cursor: 'pointer',
-                          fontSize: '1.2rem',
-                          fontWeight: '600',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                          transition: 'all 0.2s ease',
-                          boxShadow: '0 2px 4px rgba(220, 53, 69, 0.2)'
-                        }}
-                        onMouseEnter={(e) => {
-                          e.target.style.backgroundColor = '#c82333'
-                          e.target.style.transform = 'translateY(-1px)'
-                          e.target.style.boxShadow = '0 4px 8px rgba(220, 53, 69, 0.3)'
-                        }}
-                        onMouseLeave={(e) => {
-                          e.target.style.backgroundColor = '#dc3545'
-                          e.target.style.transform = 'translateY(0)'
-                          e.target.style.boxShadow = '0 2px 4px rgba(220, 53, 69, 0.2)'
-                        }}
-                      >
-                        <FaTrash /> Xóa
-                      </button>
+                      <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                        <button
+                          onClick={() => setReplyingTo(review.id)}
+                          style={{
+                            padding: '8px 14px',
+                            backgroundColor: '#17a2b8',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '8px',
+                            cursor: 'pointer',
+                            fontSize: '1.2rem',
+                            fontWeight: '600',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            transition: 'all 0.2s ease'
+                          }}
+                          onMouseEnter={(e) => {
+                            e.target.style.backgroundColor = '#138496'
+                            e.target.style.transform = 'translateY(-1px)'
+                          }}
+                          onMouseLeave={(e) => {
+                            e.target.style.backgroundColor = '#17a2b8'
+                            e.target.style.transform = 'translateY(0)'
+                          }}
+                        >
+                          <FaReply /> {review.admin_reply ? 'Sửa' : 'Trả lời'}
+                        </button>
+                        <button
+                          onClick={() => handleToggleStatus(review.id, review.status)}
+                          disabled={togglingStatus === review.id}
+                          style={{
+                            padding: '8px 14px',
+                            backgroundColor: review.status === 1 ? '#ffc107' : '#28a745',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '8px',
+                            cursor: togglingStatus === review.id ? 'not-allowed' : 'pointer',
+                            fontSize: '1.2rem',
+                            fontWeight: '600',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            transition: 'all 0.2s ease',
+                            opacity: togglingStatus === review.id ? 0.6 : 1
+                          }}
+                          onMouseEnter={(e) => {
+                            if (togglingStatus !== review.id) {
+                              e.target.style.transform = 'translateY(-1px)'
+                            }
+                          }}
+                          onMouseLeave={(e) => {
+                            e.target.style.transform = 'translateY(0)'
+                          }}
+                        >
+                          {review.status === 1 ? <FaEyeSlash /> : <FaEye />}
+                          {review.status === 1 ? 'Ẩn' : 'Hiện'}
+                        </button>
+                        <button
+                          onClick={() => handleDelete(review.id)}
+                          style={{
+                            padding: '8px 14px',
+                            backgroundColor: '#dc3545',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '8px',
+                            cursor: 'pointer',
+                            fontSize: '1.2rem',
+                            fontWeight: '600',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            transition: 'all 0.2s ease',
+                            boxShadow: '0 2px 4px rgba(220, 53, 69, 0.2)'
+                          }}
+                          onMouseEnter={(e) => {
+                            e.target.style.backgroundColor = '#c82333'
+                            e.target.style.transform = 'translateY(-1px)'
+                            e.target.style.boxShadow = '0 4px 8px rgba(220, 53, 69, 0.3)'
+                          }}
+                          onMouseLeave={(e) => {
+                            e.target.style.backgroundColor = '#dc3545'
+                            e.target.style.transform = 'translateY(0)'
+                            e.target.style.boxShadow = '0 2px 4px rgba(220, 53, 69, 0.2)'
+                          }}
+                        >
+                          <FaTrash /> Xóa
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -550,6 +736,139 @@ const AdminReviews = () => {
           color: '#6c757d'
         }}>
           Hiển thị {((currentPage - 1) * itemsPerPage) + 1} - {Math.min(currentPage * itemsPerPage, pagination.total)} trong tổng số {pagination.total} đánh giá
+        </div>
+      )}
+
+      {/* Modal Trả lời đánh giá */}
+      {replyingTo && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 2000,
+            padding: '20px'
+          }}
+          onClick={() => {
+            setReplyingTo(null)
+            setReplyText('')
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: '#fff',
+              borderRadius: '12px',
+              padding: '30px',
+              maxWidth: '600px',
+              width: '100%',
+              maxHeight: '90vh',
+              overflowY: 'auto'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 style={{ fontSize: '2rem', marginBottom: '20px', color: '#333' }}>
+              {reviews.find(r => r.id === replyingTo)?.admin_reply ? 'Sửa phản hồi' : 'Trả lời đánh giá'}
+            </h2>
+            
+            {reviews.find(r => r.id === replyingTo) && (
+              <div style={{ 
+                backgroundColor: '#f8f9fa', 
+                padding: '15px', 
+                borderRadius: '8px',
+                marginBottom: '20px'
+              }}>
+                <div style={{ fontSize: '1.3rem', fontWeight: '600', marginBottom: '8px' }}>
+                  Đánh giá từ: {reviews.find(r => r.id === replyingTo).user_name}
+                </div>
+                <div style={{ fontSize: '1.4rem', color: '#333' }}>
+                  {reviews.find(r => r.id === replyingTo).content || '(Không có nội dung)'}
+                </div>
+              </div>
+            )}
+
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ 
+                display: 'block', 
+                marginBottom: '8px', 
+                fontSize: '1.4rem', 
+                fontWeight: '600',
+                color: '#495057'
+              }}>
+                Phản hồi:
+              </label>
+              <textarea
+                value={replyText}
+                onChange={(e) => setReplyText(e.target.value)}
+                placeholder="Nhập phản hồi của bạn..."
+                rows="5"
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  fontSize: '1.4rem',
+                  border: '2px solid #e9ecef',
+                  borderRadius: '8px',
+                  outline: 'none',
+                  resize: 'vertical',
+                  fontFamily: 'inherit'
+                }}
+                onFocus={(e) => {
+                  e.target.style.borderColor = '#1976d2'
+                  e.target.style.boxShadow = '0 0 0 3px rgba(25, 118, 210, 0.1)'
+                }}
+                onBlur={(e) => {
+                  e.target.style.borderColor = '#e9ecef'
+                  e.target.style.boxShadow = 'none'
+                }}
+                autoFocus
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setReplyingTo(null)
+                  setReplyText('')
+                }}
+                style={{
+                  padding: '12px 24px',
+                  backgroundColor: '#6c757d',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontSize: '1.4rem',
+                  fontWeight: '600'
+                }}
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                onClick={() => handleReply(replyingTo)}
+                disabled={!replyText.trim()}
+                style={{
+                  padding: '12px 24px',
+                  backgroundColor: '#1976d2',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: !replyText.trim() ? 'not-allowed' : 'pointer',
+                  fontSize: '1.4rem',
+                  fontWeight: '600',
+                  opacity: !replyText.trim() ? 0.6 : 1
+                }}
+              >
+                {reviews.find(r => r.id === replyingTo)?.admin_reply ? 'Cập nhật' : 'Gửi phản hồi'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

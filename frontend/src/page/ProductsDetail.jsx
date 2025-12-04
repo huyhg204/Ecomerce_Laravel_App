@@ -20,14 +20,7 @@ import { formatCurrency } from '../utils/formatCurrency'
 import { axiosInstance } from '../utils/axiosConfig'
 import { cartService } from '../utils/cartService'
 import { authService } from '../utils/authService'
-
-// Tạm ẩn biến thể khi API chưa sẵn sàng
-// const colors = [
-//   { id: 1, name: 'Xanh dương', value: '#4285F4', selected: true },
-//   { id: 2, name: 'Đỏ', value: '#EA4335', selected: false },
-// ]
-
-// const sizes = ['XS', 'S', 'M', 'L', 'XL']
+import { formatDateOnly, formatDateShort } from '../utils/dateHelper'
 
 
 const ProductsDetail = () => {
@@ -37,9 +30,6 @@ const ProductsDetail = () => {
   const [relatedProducts, setRelatedProducts] = useState([])
   const [loading, setLoading] = useState(true)
   const [selectedImage, setSelectedImage] = useState(0)
-  // Tạm ẩn biến thể khi API chưa sẵn sàng
-  // const [selectedColor, setSelectedColor] = useState(colors[0]?.id || 1)
-  // const [selectedSize, setSelectedSize] = useState('M')
   const [quantity, setQuantity] = useState(1)
   const [newComment, setNewComment] = useState({ rating: 5, content: '' })
   const [productComments, setProductComments] = useState([])
@@ -59,16 +49,39 @@ const ProductsDetail = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
+  const [selectedSize, setSelectedSize] = useState(null)
+  const [availableSizes, setAvailableSizes] = useState([])
+
   const fetchProduct = async () => {
     try {
       setLoading(true)
       const response = await axiosInstance.get(`/product/${id}`)
       if (response.data.status === 'success') {
-        const productData = response.data.data
+        const data = response.data.data
+        const productData = data.product || data
+        const attributes = data.attributes || []
+        
+        // Lấy danh sách size từ attributes
+        const sizes = attributes
+          .filter(attr => attr.size)
+          .map(attr => ({
+            size: attr.size,
+            quantity: attr.quantity || 0,
+            id: attr.id
+          }))
+        
+        setAvailableSizes(sizes)
+        if (sizes.length > 0 && !selectedSize) {
+          setSelectedSize(sizes[0].size)
+        }
+        
         setProduct({
           id: productData.id,
           name: productData.name_product,
-          price: productData.price_product || 0,
+          price: productData.discount_price || productData.price_product || 0,
+          originalPrice: productData.original_price,
+          discountPrice: productData.discount_price,
+          discountPercent: productData.discount_percent,
           description: productData.description_product || '',
           image: productData.image_product || '',
           images: productData.images || [productData.image_product],
@@ -179,7 +192,14 @@ const ProductsDetail = () => {
     }
 
     try {
-      await cartService.addToCart(product.id, quantity)
+      // Tìm product_attribute_id từ size đã chọn
+      const selectedSizeItem = availableSizes.find(s => s.size === selectedSize)
+      const productAttributeId = selectedSizeItem?.id || null
+      
+      await cartService.addToCart(product.id, quantity, {
+        size: selectedSize,
+        product_attribute_id: productAttributeId
+      })
       toast.success('Đã thêm vào giỏ hàng!', {
         description: `Đã thêm ${quantity} sản phẩm vào giỏ hàng.`,
       })
@@ -347,7 +367,38 @@ const ProductsDetail = () => {
                 <span className="product_stock">| {product.stock > 0 ? 'Còn hàng' : 'Hết hàng'}</span>
               </div>
 
-              <div className="product_detail_price">{formatCurrency(product.price)}</div>
+              <div className="product_detail_price_wrapper">
+                {product.originalPrice && product.originalPrice > product.price ? (
+                  <>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '15px', flexWrap: 'wrap' }}>
+                      <div className="product_detail_price" style={{ color: '#dc3545' }}>
+                        {formatCurrency(product.price)}
+                      </div>
+                      <div style={{ 
+                        fontSize: '1.8rem', 
+                        color: '#999', 
+                        textDecoration: 'line-through' 
+                      }}>
+                        {formatCurrency(product.originalPrice)}
+                      </div>
+                      {product.discountPercent && (
+                        <div style={{
+                          backgroundColor: '#dc3545',
+                          color: '#fff',
+                          padding: '5px 10px',
+                          borderRadius: '5px',
+                          fontSize: '1.4rem',
+                          fontWeight: 'bold'
+                        }}>
+                          -{product.discountPercent}%
+                        </div>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <div className="product_detail_price">{formatCurrency(product.price)}</div>
+                )}
+              </div>
 
               <p className="product_detail_description">
                 {product.description || 'Không có mô tả cho sản phẩm này.'}
@@ -371,21 +422,29 @@ const ProductsDetail = () => {
                 </div>
               </div> */}
 
-              {/* Size Selection - Tạm ẩn khi API chưa sẵn sàng */}
-              {/* <div className="product_option">
-                <label className="product_option_label">Kích thước:</label>
-                <div className="product_sizes">
-                  {sizes.map((size) => (
-                    <button
-                      key={size}
-                      className={`product_size_btn ${selectedSize === size ? 'active' : ''}`}
-                      onClick={() => setSelectedSize(size)}
-                    >
-                      {size}
-                    </button>
-                  ))}
+              {/* Size Selection */}
+              {availableSizes.length > 0 && (
+                <div className="product_option">
+                  <label className="product_option_label">Kích thước:</label>
+                  <div className="product_sizes">
+                    {availableSizes.map((sizeItem) => (
+                      <button
+                        key={sizeItem.size}
+                        className={`product_size_btn ${selectedSize === sizeItem.size ? 'active' : ''}`}
+                        onClick={() => setSelectedSize(sizeItem.size)}
+                        disabled={sizeItem.quantity === 0}
+                        style={{
+                          opacity: sizeItem.quantity === 0 ? 0.5 : 1,
+                          cursor: sizeItem.quantity === 0 ? 'not-allowed' : 'pointer'
+                        }}
+                      >
+                        {sizeItem.size}
+                        {sizeItem.quantity === 0 && ' (Hết)'}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div> */}
+              )}
 
               {/* Quantity & Actions */}
               <div className="product_actions">
@@ -544,13 +603,55 @@ const ProductsDetail = () => {
                               ))}
                             </div>
                             <span className="comment_date">
-                              {new Date(comment.created_at).toLocaleDateString('vi-VN')}
+                              {formatDateShort(comment.created_at)}
                             </span>
                           </div>
                         </div>
                       </div>
                     </div>
                     <p className="comment_content">{comment.content || 'Không có nội dung'}</p>
+                    
+                    {/* Admin Reply */}
+                    {comment.admin_reply && (
+                      <div style={{
+                        marginTop: '15px',
+                        padding: '15px',
+                        backgroundColor: '#e3f2fd',
+                        borderRadius: '8px',
+                        border: '1px solid #bbdefb',
+                        borderLeft: '4px solid #1976d2'
+                      }}>
+                        <div style={{
+                          fontSize: '1.3rem',
+                          fontWeight: '600',
+                          color: '#1976d2',
+                          marginBottom: '8px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px'
+                        }}>
+                          <span>Phản hồi từ Admin:</span>
+                        </div>
+                        <p style={{
+                          fontSize: '1.4rem',
+                          color: '#333',
+                          margin: 0,
+                          lineHeight: '1.6'
+                        }}>
+                          {comment.admin_reply}
+                        </p>
+                        {comment.admin_replied_at && (
+                          <div style={{
+                            fontSize: '1.2rem',
+                            color: '#666',
+                            marginTop: '8px',
+                            fontStyle: 'italic'
+                          }}>
+                            {formatDateOnly(comment.admin_replied_at)}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))
               )}

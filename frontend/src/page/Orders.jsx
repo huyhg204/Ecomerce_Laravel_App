@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { formatCurrency } from '../utils/formatCurrency'
 import { axiosInstance } from '../utils/axiosConfig'
 import { authService } from '../utils/authService'
+import { formatDateOnly } from '../utils/dateHelper'
 
 const Orders = () => {
   const navigate = useNavigate()
@@ -136,15 +137,8 @@ const Orders = () => {
     return methodMap[methodPay] || 'Không xác định'
   }
 
-  const formatDate = (dateString) => {
-    if (!dateString) return ''
-    const date = new Date(dateString)
-    return date.toLocaleDateString('vi-VN', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-    })
-  }
+  // Sử dụng formatDateOnly từ dateHelper (chỉ hiển thị ngày, không có giờ)
+  const formatDate = formatDateOnly
 
   const handleSearchOrder = async (e) => {
     e.preventDefault()

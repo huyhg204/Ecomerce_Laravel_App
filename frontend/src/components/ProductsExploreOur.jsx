@@ -1,15 +1,11 @@
 import React, { useState, useEffect } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { toast } from 'sonner'
+import { Link } from 'react-router-dom'
 import { ClipLoader } from 'react-spinners'
 import { FaHeart, FaEye, FaStar } from 'react-icons/fa'
 import { formatCurrency } from '../utils/formatCurrency'
 import { axiosInstance } from '../utils/axiosConfig'
-import { cartService } from '../utils/cartService'
-import { authService } from '../utils/authService'
 
 const ProductsExploreOur = () => {
-  const navigate = useNavigate();
   const [products, setProducts] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -31,9 +27,14 @@ const ProductsExploreOur = () => {
         setProducts(activeProducts.slice(0, 8).map(product => ({
           id: product.id,
           title: product.name_product,
-          price: product.price_product || 0,
+          price_product: product.discount_price || product.price_product || 0,
+          original_price: product.original_price,
+          discount_price: product.discount_price,
+          discount_percent: product.discount_percent,
           image: product.image_product || '',
-          reviews: product.reviews_count || 0,
+          discount: product.discount_percent ? `-${product.discount_percent}%` : null,
+          reviews_count: product.reviews_count || 0,
+          average_rating: product.average_rating || 0,
           badge: product.badge || '',
         })))
       } else {
@@ -48,28 +49,6 @@ const ProductsExploreOur = () => {
     }
   }
 
-  const handleAddToCart = async (productId, e) => {
-    e.preventDefault()
-    e.stopPropagation()
-    
-    if (!authService.isAuthenticated()) {
-      if (window.confirm('Bạn cần đăng nhập để thêm vào giỏ hàng. Đi đến trang đăng nhập?')) {
-        navigate('/login')
-      }
-      return
-    }
-
-    try {
-      await cartService.addToCart(productId, 1)
-      toast.success('Đã thêm vào giỏ hàng!', {
-        description: 'Sản phẩm đã được thêm vào giỏ hàng.',
-      })
-    } catch (error) {
-      toast.error('Không thể thêm vào giỏ hàng', {
-        description: error.message || 'Vui lòng thử lại sau.',
-      })
-    }
-  }
 
   return (
     <section className="section">
@@ -126,7 +105,8 @@ const ProductsExploreOur = () => {
                         <span>Không có ảnh</span>
                       </div>
                     )}
-                    {product.badge && <div className="card_tag">{product.badge}</div>}
+                    {product.discount && <div className="card_tag">{product.discount}</div>}
+                    {product.badge && <div className="card_tag card_tag--new">{product.badge}</div>}
                     <div className="card_top_icons">
                       <FaHeart className="card_top_icon" />
                       <FaEye className="card_top_icon" />
@@ -136,23 +116,43 @@ const ProductsExploreOur = () => {
                     <Link to={`/products/${product.id}`} className="card_title_link">
                       <h3 className="card_title">{product.title}</h3>
                     </Link>
-                    <p className="card_price">{formatCurrency(product.price)}</p>
+                    <div className="card_price_wrapper" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      {product.original_price && product.original_price > (product.discount_price || product.price_product) ? (
+                        <>
+                          <p className="card_price" style={{ color: '#dc3545', margin: 0, fontWeight: 'bold' }}>
+                            {formatCurrency(product.discount_price || product.price_product)}
+                          </p>
+                          <p style={{ 
+                            fontSize: '1.2rem', 
+                            color: '#999', 
+                            textDecoration: 'line-through',
+                            margin: 0
+                          }}>
+                            {formatCurrency(product.original_price)}
+                          </p>
+                        </>
+                      ) : (
+                        <p className="card_price" style={{ margin: 0 }}>{formatCurrency(product.price_product)}</p>
+                      )}
+                    </div>
                     <div className="card_ratings">
                       <div className="card_stars">
-                        <FaStar className="w-6 h-6" />
-                        <FaStar className="w-6 h-6" />
-                        <FaStar className="w-6 h-6" />
-                        <FaStar className="w-6 h-6" />
-                        <FaStar className="w-6 h-6" />
+                        {Array.from({ length: 5 }).map((_, index) => (
+                          <FaStar 
+                            key={index}
+                            className={`w-6 h-6 ${index < Math.floor(product.average_rating || 0) ? 'active' : ''}`}
+                          />
+                        ))}
                       </div>
-                      <p className="card_rating_numbers">({product.reviews})</p>
+                      <p className="card_rating_numbers">({product.reviews_count || 0})</p>
                     </div>
-                    <button 
+                    <Link
+                      to={`/products/${product.id}`}
                       className="add_to_cart add_to_cart--inline"
-                      onClick={(e) => handleAddToCart(product.id, e)}
+                      style={{ textDecoration: 'none', display: 'block', textAlign: 'center' }}
                     >
-                      Thêm vào giỏ
-                    </button>
+                      Xem chi tiết
+                    </Link>
                   </div>
                 </div>
               ))}
