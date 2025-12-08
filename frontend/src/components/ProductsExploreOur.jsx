@@ -1,18 +1,29 @@
 import React, { useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { ClipLoader } from 'react-spinners'
-import { FaHeart, FaEye, FaStar } from 'react-icons/fa'
+import { FaHeart, FaStar } from 'react-icons/fa'
+import { toast } from 'sonner'
 import { formatCurrency } from '../utils/formatCurrency'
 import { axiosInstance } from '../utils/axiosConfig'
+import { authService } from '../utils/authService'
 
 const ProductsExploreOur = () => {
+  const navigate = useNavigate()
   const [products, setProducts] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [wishlistStatus, setWishlistStatus] = useState({}) // { productId: boolean }
 
   useEffect(() => {
     fetchProducts()
   }, [])
+
+  // Check wishlist status khi products thay đổi
+  useEffect(() => {
+    if (products.length > 0 && authService.isAuthenticated()) {
+      checkWishlistStatus()
+    }
+  }, [products])
 
   const fetchProducts = async () => {
     try {
@@ -49,6 +60,58 @@ const ProductsExploreOur = () => {
     }
   }
 
+  const checkWishlistStatus = async () => {
+    if (!authService.isAuthenticated()) return
+    
+    try {
+      const response = await axiosInstance.get('/user/wishlist')
+      if (response.data.status === 'success') {
+        const wishlistItems = response.data.data || []
+        const wishlistMap = {}
+        wishlistItems.forEach(item => {
+          wishlistMap[item.product_id] = true
+        })
+        setWishlistStatus(wishlistMap)
+      }
+    } catch (error) {
+      // Silent fail - không hiển thị lỗi nếu không check được wishlist
+      console.error('Lỗi khi kiểm tra wishlist:', error)
+    }
+  }
+
+  const handleToggleWishlist = async (productId, e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    
+    if (!authService.isAuthenticated()) {
+      if (window.confirm('Bạn cần đăng nhập để thêm vào yêu thích. Đi đến trang đăng nhập?')) {
+        navigate('/login')
+      }
+      return
+    }
+
+    const isInWishlist = wishlistStatus[productId]
+
+    try {
+      if (isInWishlist) {
+        await axiosInstance.post('/user/wishlist/remove', { product_id: productId })
+        setWishlistStatus(prev => ({ ...prev, [productId]: false }))
+        toast.success('Đã xóa khỏi danh sách yêu thích')
+      } else {
+        await axiosInstance.post('/user/wishlist', { product_id: productId })
+        setWishlistStatus(prev => ({ ...prev, [productId]: true }))
+        toast.success('Đã thêm vào danh sách yêu thích')
+      }
+      
+      // Cập nhật badge wishlist trên nav
+      window.dispatchEvent(new Event('updateWishlistCount'))
+    } catch (error) {
+      toast.error('Không thể cập nhật danh sách yêu thích', {
+        description: error.response?.data?.message || 'Vui lòng thử lại sau.',
+      })
+    }
+  }
+
 
   return (
     <section className="section">
@@ -77,7 +140,7 @@ const ProductsExploreOur = () => {
             padding: '40px 0',
             gap: '15px'
           }}>
-            <ClipLoader color="#1976d2" size={40} />
+            <ClipLoader color="#d32f2f" size={40} />
             <p style={{ fontSize: '1.4rem', color: '#666' }}>
               Đang tải sản phẩm...
             </p>
@@ -108,8 +171,23 @@ const ProductsExploreOur = () => {
                     {product.discount && <div className="card_tag">{product.discount}</div>}
                     {product.badge && <div className="card_tag card_tag--new">{product.badge}</div>}
                     <div className="card_top_icons">
-                      <FaHeart className="card_top_icon" />
-                      <FaEye className="card_top_icon" />
+                      <button
+                        onClick={(e) => handleToggleWishlist(product.id, e)}
+                        className="card_top_icon"
+                        style={{
+                          border: 'none',
+                          cursor: 'pointer',
+                          padding: 0,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          backgroundColor: wishlistStatus[product.id] ? '#dc3545' : 'var(--colo-white-1)',
+                          color: wishlistStatus[product.id] ? '#fff' : 'var(--colo-dark-1)'
+                        }}
+                        aria-label="Thêm vào yêu thích"
+                      >
+                        <FaHeart />
+                      </button>
                     </div>
                   </div>
                   <div className="card_body">

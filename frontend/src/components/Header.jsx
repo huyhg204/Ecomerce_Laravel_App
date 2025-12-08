@@ -26,7 +26,6 @@ const Header = () => {
       if (response.data.status === 'success') {
         const data = response.data.data
         const categoriesList = Array.isArray(data) ? data : (data?.categories || [])
-        // Chỉ lấy danh mục đang hoạt động (status_category === 0)
         const activeCategories = categoriesList.filter(category => category.status_category === 0)
         setCategories(activeCategories)
       } else {
@@ -44,13 +43,12 @@ const Header = () => {
     try {
       setBannersLoading(true)
       const response = await axiosInstance.get('/banners', {
-        params: { position: 0 } // Lấy banner cho hero slider
+        params: { position: 0 } // Hero slider
       })
       
       if (response.data.status === 'success') {
         const bannersData = response.data.data || []
         const bannersArray = Array.isArray(bannersData) ? bannersData : []
-        // Chỉ lấy banner đang hoạt động và có ảnh
         const activeBanners = bannersArray
           .filter(banner => banner.status === 1 && banner.image)
           .map(banner => ({
@@ -59,98 +57,82 @@ const Header = () => {
             title: banner.title || '',
             description: banner.description || '',
             image: getImageUrl(banner.image),
-            link: banner.link || '/collections/featured'
+            link: banner.link || '/products'
           }))
         
-        setHeroSlides(activeBanners.length > 0 ? activeBanners : [
-          // Fallback banner nếu không có banner nào
-          {
-            id: 1,
-            badge: 'iPhone 15 Series',
-            title: 'Voucher giảm đến 10%',
-            description: 'Thiết bị cao cấp với chip A17 siêu nhanh cho mọi nhu cầu.',
-            image: 'https://images.unsplash.com/photo-1523475472560-d2df97ec485c?auto=format&fit=crop&w=900&q=80',
-            link: '/collections/featured'
-          },
-        ])
+        setHeroSlides(activeBanners.length > 0 ? activeBanners : getFallbackSlides())
       } else {
-        // Fallback nếu API lỗi
-        setHeroSlides([{
-          id: 1,
-          badge: 'iPhone 15 Series',
-          title: 'Voucher giảm đến 10%',
-          description: 'Thiết bị cao cấp với chip A17 siêu nhanh cho mọi nhu cầu.',
-          image: 'https://images.unsplash.com/photo-1523475472560-d2df97ec485c?auto=format&fit=crop&w=900&q=80',
-          link: '/collections/featured'
-        }])
+        setHeroSlides(getFallbackSlides())
       }
     } catch (error) {
       console.error('Lỗi khi lấy banner:', error)
-      // Fallback nếu API lỗi
-      setHeroSlides([{
-        id: 1,
-        badge: 'iPhone 15 Series',
-        title: 'Voucher giảm đến 10%',
-        description: 'Thiết bị cao cấp với chip A17 siêu nhanh cho mọi nhu cầu.',
-        image: 'https://images.unsplash.com/photo-1523475472560-d2df97ec485c?auto=format&fit=crop&w=900&q=80',
-        link: '/collections/featured'
-      }])
+      setHeroSlides(getFallbackSlides())
     } finally {
       setBannersLoading(false)
     }
   }
+
+  // Dữ liệu mặc định chuẩn Fashion (Giống ảnh thiết kế)
+  const getFallbackSlides = () => [
+    {
+      id: 1,
+      badge: 'Summer Sale',
+      title: 'Giảm Giá Lên Đến 50%',
+      description: 'Săn ngay những bộ outfit cực chất cho mùa hè này. Số lượng có hạn!',
+      // Ảnh cô gái đeo kính râm, nền vàng/sáng giống ảnh mẫu
+      image: 'https://images.unsplash.com/photo-1507086183495-2d9326e2e259?auto=format&fit=crop&w=900&q=80',
+      link: '/products'
+    },
+    {
+      id: 2,
+      badge: 'New Collection',
+      title: 'Thời Trang Gen Z',
+      description: 'Định hình phong cách cá nhân với các thiết kế mới nhất.',
+      image: 'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=900&q=80',
+      link: '/products'
+    }
+  ]
 
   return (
     <header className="header">
       <div className="container header_container">
         <aside className="header_filter">
           {loading ? (
-            <ul className="header_filter_list">
-              <li className="header_filter_item" style={{ 
-                display: 'flex', 
-                flexDirection: 'column',
-                justifyContent: 'center', 
-                alignItems: 'center',
-                padding: '20px',
-                gap: '10px'
-              }}>
-                <ClipLoader color="#1976d2" size={20} />
-                <span style={{ fontSize: '1.2rem', color: '#666' }}>Đang tải...</span>
-              </li>
-            </ul>
+            <div style={{ display: 'flex', justifyContent: 'center', padding: '20px' }}>
+              <ClipLoader color="#d32f2f" size={20} />
+            </div>
           ) : (
             <ul className="header_filter_list">
-              {categories.map((category) => {
-                const categoryName = category.name_category || category.name || ''
-                return (
-                  <li key={category.id} className="header_filter_item">
-                    <Link 
-                      to={`/products?category=${encodeURIComponent(categoryName)}`} 
-                      className="header_filter_link"
-                    >
-                      {categoryName}
-                    </Link>
-                  </li>
-                )
-              })}
+              {categories.map((category) => (
+                <li key={category.id} className="header_filter_item">
+                  <Link 
+                    to={`/products?category=${encodeURIComponent(category.name_category)}`} 
+                    className="header_filter_link"
+                  >
+                    {category.name_category}
+                  </Link>
+                </li>
+              ))}
+              {/* Fallback categories nếu API trống để layout không bị gãy */}
+              {categories.length === 0 && ['Áo Thun', 'Áo Khoác', 'Quần Jeans', 'Váy', 'Phụ Kiện'].map((item, index) => (
+                 <li key={index} className="header_filter_item">
+                   <Link to="/products" className="header_filter_link">{item}</Link>
+                 </li>
+              ))}
             </ul>
           )}
         </aside>
+        
         <div className="hero_slider">
           {bannersLoading ? (
-            <div style={{ 
-              display: 'flex', 
-              justifyContent: 'center', 
-              alignItems: 'center',
-              minHeight: '400px'
-            }}>
-              <ClipLoader color="#1976d2" size={40} />
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
+              <ClipLoader color="#d32f2f" size={40} />
             </div>
-          ) : heroSlides.length > 0 ? (
+          ) : (
             <Swiper
               modules={[Pagination, Autoplay]}
               pagination={{ clickable: true }}
-              autoplay={{ delay: 5000 }}
+              autoplay={{ delay: 5000, disableOnInteraction: false }}
               loop={heroSlides.length > 1}
               className="hero_swiper"
             >
@@ -162,21 +144,22 @@ const Header = () => {
                       {slide.title && <h2 className="hero_slide_title">{slide.title}</h2>}
                       {slide.description && <p className="hero_slide_desc">{slide.description}</p>}
                       <Link to={slide.link} className="hero_cta">
-                        Mua ngay
+                        MUA NGAY
                       </Link>
                     </div>
                     {slide.image && (
                       <img
                         src={slide.image}
-                        alt={slide.title || 'Banner'}
+                        alt={slide.title}
                         className="hero_slide_img"
+                        style={{ objectFit: 'cover' }}
                       />
                     )}
                   </div>
                 </SwiperSlide>
               ))}
             </Swiper>
-          ) : null}
+          )}
         </div>
       </div>
     </header>

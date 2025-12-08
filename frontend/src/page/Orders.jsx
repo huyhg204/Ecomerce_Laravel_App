@@ -129,10 +129,11 @@ const Orders = () => {
   }
 
   const getPaymentMethod = (methodPay) => {
-    // method_pay: 0 = cash, 1 = bank
+    // method_pay: 0 = cash, 1 = bank, 2 = MoMo
     const methodMap = {
       0: 'Thanh toán khi nhận hàng',
       1: 'Thanh toán qua ngân hàng',
+      2: 'Thanh toán qua MoMo',
     }
     return methodMap[methodPay] || 'Không xác định'
   }
@@ -533,9 +534,11 @@ const Orders = () => {
                           justifyContent: 'space-between', 
                           alignItems: 'center',
                           paddingTop: '15px',
-                          borderTop: '1px solid #e0e0e0'
+                          borderTop: '1px solid #e0e0e0',
+                          gap: '15px',
+                          flexWrap: 'wrap'
                         }}>
-                          <div>
+                          <div style={{ flex: '1 1 auto' }}>
                             <span style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>
                               Tổng tiền: {formatCurrency(order.total_order)}
                             </span>
@@ -548,7 +551,9 @@ const Orders = () => {
                               color: 'white',
                               borderRadius: '5px',
                               textDecoration: 'none',
-                              fontSize: '1.4rem'
+                              fontSize: '1.4rem',
+                              whiteSpace: 'nowrap',
+                              flexShrink: 0
                             }}
                           >
                             Xem chi tiết

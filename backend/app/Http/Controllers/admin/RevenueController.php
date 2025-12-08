@@ -127,4 +127,97 @@ class RevenueController extends Controller
             ]
         ], 200);
     }
+
+    /**
+     * Thống kê đơn hàng 7 ngày gần nhất
+     * Có thể filter theo ngày bắt đầu
+     */
+    public function getLast7DaysStats(Request $request)
+    {
+        // Lấy ngày bắt đầu từ request (mặc định là 7 ngày trước)
+        $startDate = $request->input('start_date', Carbon::now()->subDays(6)->toDateString());
+        $endDate = $request->input('end_date', Carbon::now()->toDateString());
+
+        try {
+            // Parse dates
+            $start = Carbon::parse($startDate)->startOfDay();
+            $end = Carbon::parse($endDate)->endOfDay();
+
+            // Tạo mảng 7 ngày
+            $days = [];
+            $currentDate = $start->copy();
+            
+            while ($currentDate <= $end) {
+                $days[] = $currentDate->copy();
+                $currentDate->addDay();
+            }
+
+            // Lấy dữ liệu đơn hàng trong khoảng thời gian
+            $orders = DB::table('orders')
+                ->select(
+                    DB::raw('DATE(date_order) as order_date'),
+                    DB::raw('COUNT(*) as total_orders'),
+                    DB::raw('SUM(total_order) as total_revenue'),
+                    DB::raw('SUM(CASE WHEN status_order = 2 THEN 1 ELSE 0 END) as completed_orders'),
+                    DB::raw('SUM(CASE WHEN status_order = 0 THEN 1 ELSE 0 END) as pending_orders'),
+                    DB::raw('SUM(CASE WHEN status_order = 1 THEN 1 ELSE 0 END) as processing_orders')
+                )
+                ->whereBetween('date_order', [$start, $end])
+                ->groupBy(DB::raw('DATE(date_order)'))
+                ->orderBy('order_date')
+                ->get();
+
+            // Tạo map để dễ dàng lookup
+            $ordersMap = [];
+            foreach ($orders as $order) {
+                $ordersMap[$order->order_date] = $order;
+            }
+
+            // Tạo dữ liệu cho chart (đảm bảo có đủ 7 ngày)
+            $chartData = [];
+            foreach ($days as $day) {
+                $dateKey = $day->toDateString();
+                $orderData = $ordersMap[$dateKey] ?? null;
+
+                $chartData[] = [
+                    'date' => $dateKey,
+                    'date_label' => $day->format('d/m/Y'),
+                    'day_label' => $day->format('D'),
+                    'total_orders' => (int)($orderData->total_orders ?? 0),
+                    'total_revenue' => (float)($orderData->total_revenue ?? 0),
+                    'completed_orders' => (int)($orderData->completed_orders ?? 0),
+                    'pending_orders' => (int)($orderData->pending_orders ?? 0),
+                    'processing_orders' => (int)($orderData->processing_orders ?? 0),
+                ];
+            }
+
+            // Tính tổng
+            $summary = [
+                'total_orders' => array_sum(array_column($chartData, 'total_orders')),
+                'total_revenue' => array_sum(array_column($chartData, 'total_revenue')),
+                'total_completed' => array_sum(array_column($chartData, 'completed_orders')),
+                'total_pending' => array_sum(array_column($chartData, 'pending_orders')),
+                'total_processing' => array_sum(array_column($chartData, 'processing_orders')),
+            ];
+
+            return response()->json([
+                'status' => 'success',
+                'data' => [
+                    'chart_data' => $chartData,
+                    'summary' => $summary,
+                    'date_range' => [
+                        'start_date' => $start->toDateString(),
+                        'end_date' => $end->toDateString(),
+                        'days_count' => count($days)
+                    ]
+                ]
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Lỗi khi lấy dữ liệu thống kê: ' . $e->getMessage()
+            ], 500);
+        }
+    }
 }

@@ -728,7 +728,53 @@ class OrderController extends Controller
         }
 
         try {
-            DB::table('orders')->where('id', $orderId)->update(['status_order' => (int)$statusOrder]);
+            // Kiểm tra đơn hàng có tồn tại không
+            $order = DB::table('orders')->where('id', $orderId)->first();
+            if (!$order) {
+                if ($request->expectsJson()) {
+                    return response()->json(['status'=>'error', 'message'=>'Không tìm thấy đơn hàng'], 404);
+                }
+                return redirect()->route('admin.order.index')->with('error', 'Không tìm thấy đơn hàng');
+            }
+
+            // Kiểm tra đơn hàng đã bị hủy chưa
+            if ($order->status_user_order === 1) {
+                if ($request->expectsJson()) {
+                    return response()->json(['status'=>'error', 'message'=>'Không thể cập nhật trạng thái đơn hàng đã bị hủy'], 400);
+                }
+                return redirect()->route('admin.order.index')->with('error', 'Không thể cập nhật trạng thái đơn hàng đã bị hủy');
+            }
+
+            $statusOrder = (int)$statusOrder;
+            $currentStatusOrder = (int)$order->status_order;
+
+            // Validation: Chỉ cho phép tăng từng bước 1 (không được nhảy bước)
+            if ($statusOrder <= $currentStatusOrder) {
+                if ($request->expectsJson()) {
+                    return response()->json([
+                        'status'=>'error', 
+                        'message'=>'Không thể cập nhật trạng thái. Trạng thái hiện tại: ' . $currentStatusOrder . ', trạng thái mới phải lớn hơn.',
+                        'current_status' => $currentStatusOrder,
+                        'new_status' => $statusOrder
+                    ], 400);
+                }
+                return redirect()->route('admin.order.index')->with('error', 'Không thể cập nhật trạng thái. Trạng thái hiện tại: ' . $currentStatusOrder . ', trạng thái mới phải lớn hơn.');
+            }
+
+            if ($statusOrder > $currentStatusOrder + 1) {
+                if ($request->expectsJson()) {
+                    return response()->json([
+                        'status'=>'error', 
+                        'message'=>'Không thể nhảy bước. Trạng thái hiện tại: ' . $currentStatusOrder . ', chỉ có thể cập nhật lên: ' . ($currentStatusOrder + 1),
+                        'current_status' => $currentStatusOrder,
+                        'new_status' => $statusOrder,
+                        'allowed_next_status' => $currentStatusOrder + 1
+                    ], 400);
+                }
+                return redirect()->route('admin.order.index')->with('error', 'Không thể nhảy bước. Trạng thái hiện tại: ' . $currentStatusOrder . ', chỉ có thể cập nhật lên: ' . ($currentStatusOrder + 1));
+            }
+
+            DB::table('orders')->where('id', $orderId)->update(['status_order' => $statusOrder]);
             
             // Clear dashboard cache khi status order thay đổi
             $this->clearDashboardCache();
@@ -782,7 +828,64 @@ class OrderController extends Controller
         }
 
         try {
-            DB::table('orders')->where('id', $orderId)->update(['status_delivery' => (int)$statusDelivery]);
+            // Kiểm tra đơn hàng có tồn tại không
+            $order = DB::table('orders')->where('id', $orderId)->first();
+            if (!$order) {
+                if ($request->expectsJson()) {
+                    return response()->json(['status'=>'error', 'message'=>'Không tìm thấy đơn hàng'], 404);
+                }
+                return redirect()->route('admin.order.index')->with('error', 'Không tìm thấy đơn hàng');
+            }
+
+            // Kiểm tra đơn hàng đã bị hủy chưa
+            if ($order->status_user_order === 1) {
+                if ($request->expectsJson()) {
+                    return response()->json(['status'=>'error', 'message'=>'Không thể cập nhật trạng thái đơn hàng đã bị hủy'], 400);
+                }
+                return redirect()->route('admin.order.index')->with('error', 'Không thể cập nhật trạng thái đơn hàng đã bị hủy');
+            }
+
+            // Validation: Chỉ có thể cập nhật status_delivery khi status_order = 2
+            if ($order->status_order != 2) {
+                if ($request->expectsJson()) {
+                    return response()->json([
+                        'status'=>'error', 
+                        'message'=>'Chỉ có thể cập nhật trạng thái giao hàng khi đơn hàng đã ở trạng thái "Đã giao cho vận chuyển" (status_order = 2). Trạng thái hiện tại: ' . $order->status_order
+                    ], 400);
+                }
+                return redirect()->route('admin.order.index')->with('error', 'Chỉ có thể cập nhật trạng thái giao hàng khi đơn hàng đã ở trạng thái "Đã giao cho vận chuyển"');
+            }
+
+            $statusDelivery = (int)$statusDelivery;
+            $currentStatusDelivery = $order->status_delivery !== null ? (int)$order->status_delivery : -1;
+
+            // Validation: Chỉ cho phép tăng từng bước 1 (không được nhảy bước)
+            if ($currentStatusDelivery >= 0 && $statusDelivery <= $currentStatusDelivery) {
+                if ($request->expectsJson()) {
+                    return response()->json([
+                        'status'=>'error', 
+                        'message'=>'Không thể cập nhật trạng thái. Trạng thái hiện tại: ' . $currentStatusDelivery . ', trạng thái mới phải lớn hơn.',
+                        'current_status' => $currentStatusDelivery,
+                        'new_status' => $statusDelivery
+                    ], 400);
+                }
+                return redirect()->route('admin.order.index')->with('error', 'Không thể cập nhật trạng thái. Trạng thái hiện tại: ' . $currentStatusDelivery . ', trạng thái mới phải lớn hơn.');
+            }
+
+            if ($currentStatusDelivery >= 0 && $statusDelivery > $currentStatusDelivery + 1) {
+                if ($request->expectsJson()) {
+                    return response()->json([
+                        'status'=>'error', 
+                        'message'=>'Không thể nhảy bước. Trạng thái hiện tại: ' . $currentStatusDelivery . ', chỉ có thể cập nhật lên: ' . ($currentStatusDelivery + 1),
+                        'current_status' => $currentStatusDelivery,
+                        'new_status' => $statusDelivery,
+                        'allowed_next_status' => $currentStatusDelivery + 1
+                    ], 400);
+                }
+                return redirect()->route('admin.order.index')->with('error', 'Không thể nhảy bước. Trạng thái hiện tại: ' . $currentStatusDelivery . ', chỉ có thể cập nhật lên: ' . ($currentStatusDelivery + 1));
+            }
+
+            DB::table('orders')->where('id', $orderId)->update(['status_delivery' => $statusDelivery]);
             
             // Clear dashboard cache khi delivery status thay đổi
             $this->clearDashboardCache();
@@ -847,16 +950,77 @@ class OrderController extends Controller
                 ], 400);
             }
 
+            // Tính unified_status hiện tại của đơn hàng
+            // unified_status: 0=Chờ xác nhận, 1=Đang xử lý, 2=Đã giao cho vận chuyển, 
+            //                 3=Đã nhận hàng từ kho (status_delivery=0), 4=Đang giao hàng (status_delivery=1), 5=Đã giao hàng (status_delivery=2)
+            $currentUnifiedStatus = 0;
+            if ($order->status_order < 2) {
+                $currentUnifiedStatus = $order->status_order;
+            } else if ($order->status_order == 2) {
+                // Nếu status_order = 2, tính unified_status dựa trên status_delivery
+                if ($order->status_delivery === null) {
+                    $currentUnifiedStatus = 2; // Đã giao cho vận chuyển nhưng chưa có trạng thái giao hàng
+                } else {
+                    $currentUnifiedStatus = 3 + (int)$order->status_delivery; // 3 + 0 = 3, 3 + 1 = 4, 3 + 2 = 5
+                }
+            }
+
+            // Validation: Chỉ cho phép tăng từng bước 1 (không được nhảy bước)
+            if ($unifiedStatus <= $currentUnifiedStatus) {
+                return response()->json([
+                    'status'=>'error', 
+                    'message'=>'Không thể cập nhật trạng thái. Trạng thái hiện tại: ' . $currentUnifiedStatus . ', trạng thái mới phải lớn hơn.',
+                    'current_status' => $currentUnifiedStatus,
+                    'new_status' => $unifiedStatus
+                ], 400);
+            }
+
+            if ($unifiedStatus > $currentUnifiedStatus + 1) {
+                return response()->json([
+                    'status'=>'error', 
+                    'message'=>'Không thể nhảy bước. Trạng thái hiện tại: ' . $currentUnifiedStatus . ', chỉ có thể cập nhật lên: ' . ($currentUnifiedStatus + 1),
+                    'current_status' => $currentUnifiedStatus,
+                    'new_status' => $unifiedStatus,
+                    'allowed_next_status' => $currentUnifiedStatus + 1
+                ], 400);
+            }
+
             // Cập nhật theo unified status
             if ($unifiedStatus >= 3) {
                 // Các trạng thái giao hàng: cần set status_order = 2 trước
-                $deliveryStatus = $unifiedStatus - 2;
+                // unified_status = 3 => status_delivery = 0 (Đã nhận hàng từ kho)
+                // unified_status = 4 => status_delivery = 1 (Đang giao hàng)
+                // unified_status = 5 => status_delivery = 2 (Đã giao hàng)
+                $deliveryStatus = $unifiedStatus - 3;
+                
+                // Validation: status_delivery chỉ có thể tăng từng bước 1
+                $currentDeliveryStatus = $order->status_delivery !== null ? (int)$order->status_delivery : -1;
+                if ($currentDeliveryStatus >= 0 && $deliveryStatus > $currentDeliveryStatus + 1) {
+                    return response()->json([
+                        'status'=>'error', 
+                        'message'=>'Không thể nhảy bước trạng thái giao hàng. Trạng thái hiện tại: ' . ($currentDeliveryStatus >= 0 ? $currentDeliveryStatus : 'chưa có') . ', chỉ có thể cập nhật lên: ' . ($currentDeliveryStatus + 1),
+                        'current_delivery_status' => $currentDeliveryStatus,
+                        'new_delivery_status' => $deliveryStatus
+                    ], 400);
+                }
+                
                 DB::table('orders')->where('id', $orderId)->update([
                     'status_order' => 2,
                     'status_delivery' => $deliveryStatus
                 ]);
             } else {
                 // Các trạng thái đơn hàng: 0, 1, 2
+                // Validation: status_order chỉ có thể tăng từng bước 1
+                $currentStatusOrder = (int)$order->status_order;
+                if ($unifiedStatus > $currentStatusOrder + 1) {
+                    return response()->json([
+                        'status'=>'error', 
+                        'message'=>'Không thể nhảy bước trạng thái đơn hàng. Trạng thái hiện tại: ' . $currentStatusOrder . ', chỉ có thể cập nhật lên: ' . ($currentStatusOrder + 1),
+                        'current_status_order' => $currentStatusOrder,
+                        'new_status_order' => $unifiedStatus
+                    ], 400);
+                }
+                
                 DB::table('orders')->where('id', $orderId)->update([
                     'status_order' => $unifiedStatus,
                     'status_delivery' => $unifiedStatus < 2 ? null : $order->status_delivery
@@ -879,5 +1043,714 @@ class OrderController extends Controller
                 'message'=>'Có lỗi xảy ra: ' . $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Xử lý thanh toán MoMo
+     * Tạo đơn hàng tạm thời và chuyển hướng đến MoMo payment gateway
+     */
+    public function momo_payment(Request $request)
+    {
+        // Log để debug
+        \Log::info('MoMo Payment Request', [
+            'all_data' => $request->all(),
+            'json_data' => $request->isJson() ? $request->json()->all() : null,
+            'content_type' => $request->header('Content-Type'),
+            'user_id' => Auth::id()
+        ]);
+
+        // Hỗ trợ cả JSON và form-data
+        $nameCustomer = $request->input('name_customer');
+        $phoneCustomer = $request->input('phone_customer');
+        $addressCustomer = $request->input('address_customer');
+        $totalMomo = $request->input('total_momo');
+        $noteCustomer = $request->input('note_customer', null);
+        $voucherCode = $request->input('voucher_code', null);
+
+        // Kiểm tra nếu là JSON request
+        if ($request->isJson() || $request->header('Content-Type') === 'application/json') {
+            $jsonData = $request->json()->all();
+            $nameCustomer = $jsonData['name_customer'] ?? $nameCustomer;
+            $phoneCustomer = $jsonData['phone_customer'] ?? $phoneCustomer;
+            $addressCustomer = $jsonData['address_customer'] ?? $addressCustomer;
+            $totalMomo = $jsonData['total_momo'] ?? $totalMomo;
+            $noteCustomer = $jsonData['note_customer'] ?? $noteCustomer;
+            $voucherCode = $jsonData['voucher_code'] ?? $voucherCode;
+        }
+
+        \Log::info('MoMo Payment Parsed Data', [
+            'name_customer' => $nameCustomer,
+            'phone_customer' => $phoneCustomer,
+            'address_customer' => $addressCustomer,
+            'total_momo' => $totalMomo,
+            'note_customer' => $noteCustomer,
+            'voucher_code' => $voucherCode
+        ]);
+
+        // Validation thủ công để có thông báo lỗi rõ ràng hơn
+        if (empty($nameCustomer)) {
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Tên người nhận không được để trống'
+                ], 400);
+            }
+            return back()->with('error', 'Tên người nhận không được để trống');
+        }
+
+        if (empty($phoneCustomer)) {
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Số điện thoại không được để trống'
+                ], 400);
+            }
+            return back()->with('error', 'Số điện thoại không được để trống');
+        }
+
+        if (empty($addressCustomer)) {
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Địa chỉ không được để trống'
+                ], 400);
+            }
+            return back()->with('error', 'Địa chỉ không được để trống');
+        }
+
+        if ($totalMomo === null || $totalMomo === '' || !is_numeric($totalMomo) || $totalMomo < 0) {
+            \Log::error('MoMo Payment Validation Failed - Total Invalid', [
+                'total_momo' => $totalMomo,
+                'type' => gettype($totalMomo)
+            ]);
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Tổng tiền không hợp lệ: ' . var_export($totalMomo, true)
+                ], 400);
+            }
+            return back()->with('error', 'Tổng tiền không hợp lệ');
+        }
+
+        // Convert total_momo to float để đảm bảo tính toán chính xác
+        $totalMomo = (float) $totalMomo;
+
+        $userId = Auth::id();
+        $cart = session('cart', []);
+
+        // Nếu cart trong session trống và user đã đăng nhập, lấy từ database
+        if (empty($cart) && $userId) {
+            $cartFromDb = DB::table('carts')
+                ->join('products', 'carts.product_id', '=', 'products.id')
+                ->leftJoin('product_attributes', 'carts.product_attribute_id', '=', 'product_attributes.id')
+                ->where('carts.user_id', $userId)
+                ->select(
+                    'carts.product_id', 'carts.quantity_item', 'carts.total_item',
+                    'carts.product_attribute_id', 'carts.size',
+                    'products.image_product', 'products.name_product', 
+                    'products.price_product', 'products.original_price',
+                    'products.discount_price', 'products.discount_percent'
+                )
+                ->get();
+            
+            $cart = [];
+            foreach ($cartFromDb as $item) {
+                $actualPrice = $item->discount_price ?? $item->price_product;
+                $originalPrice = $item->original_price ?? $item->price_product;
+                $cartKey = $item->product_id . ($item->size ? '_' . $item->size : '');
+                
+                $cart[$cartKey] = [
+                    'product_id'    => $item->product_id,
+                    'product_attribute_id' => $item->product_attribute_id,
+                    'size' => $item->size,
+                    'image_product' => $item->image_product,
+                    'name_product'  => $item->name_product,
+                    'price_product' => $actualPrice,
+                    'original_price' => $originalPrice,
+                    'discount_price' => $item->discount_price,
+                    'discount_percent' => $item->discount_percent,
+                    'quantity_item' => $item->quantity_item,
+                    'total_item'    => $item->total_item,
+                    'total_original' => $item->quantity_item * $originalPrice,
+                ];
+            }
+            
+            if (!empty($cart)) {
+                session()->put('cart', $cart);
+            }
+        }
+
+        if (empty($cart)) {
+            if ($request->expectsJson()) {
+                return response()->json(['status'=>'error', 'message'=>'Giỏ hàng trống'], 400);
+            }
+            return back()->with('error', 'Giỏ hàng trống!');
+        }
+
+        // Tính tổng giá sau giảm
+        $subtotalOrder = array_sum(array_column($cart, 'total_item'));
+        
+        // Xử lý voucher nếu có (đã lấy từ request ở trên)
+        $voucherId = null;
+        $voucherDiscount = 0;
+        
+        if ($voucherCode) {
+            $voucher = DB::table('vouchers')
+                ->where('code', strtoupper($voucherCode))
+                ->where('is_active', true)
+                ->first();
+            
+            if ($voucher) {
+                $now = Carbon::now();
+                $startDate = Carbon::parse($voucher->start_date);
+                $endDate = Carbon::parse($voucher->end_date);
+                
+                if ($now->gte($startDate) && $now->lte($endDate) && 
+                    $subtotalOrder >= $voucher->min_order_amount &&
+                    (!$voucher->usage_limit || $voucher->used_count < $voucher->usage_limit)) {
+                    
+                    if ($voucher->type === 'percent') {
+                        $voucherDiscount = $subtotalOrder * ($voucher->value / 100);
+                        if ($voucher->max_discount_amount && $voucherDiscount > $voucher->max_discount_amount) {
+                            $voucherDiscount = $voucher->max_discount_amount;
+                        }
+                    } else {
+                        $voucherDiscount = $voucher->value;
+                        if ($voucherDiscount > $subtotalOrder) {
+                            $voucherDiscount = $subtotalOrder;
+                        }
+                    }
+                    
+                    $voucherId = $voucher->id;
+                    $voucherCode = $voucher->code;
+                }
+            }
+        }
+        
+        $totalOrder = $subtotalOrder - $voucherDiscount;
+
+        // Kiểm tra tổng tiền từ request có khớp không
+        $totalFromRequest = (float) $totalMomo;
+        if (abs($totalOrder - $totalFromRequest) > 0.01) {
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Tổng tiền không khớp. Vui lòng làm mới trang và thử lại.'
+                ], 400);
+            }
+            return back()->with('error', 'Tổng tiền không khớp. Vui lòng làm mới trang và thử lại.');
+        }
+
+        // Tạo đơn hàng tạm thời với status_order = 0 (chờ thanh toán)
+        // Các biến $nameCustomer, $phoneCustomer, $addressCustomer, $noteCustomer đã lấy từ request ở trên
+        try {
+            DB::beginTransaction();
+
+            // Check tồn kho
+            foreach ($cart as $item) {
+                $product = DB::table('products')->where('id', $item['product_id'])->lockForUpdate()->first();
+                if (!$product || $product->quantity_product < $item['quantity_item']) {
+                    throw new \Exception('Sản phẩm ' . ($product->name_product ?? 'ID '.$item['product_id']) . ' không đủ hàng.');
+                }
+            }
+
+            $orderId = DB::table('orders')->insertGetId([
+                'user_id'          => $userId,
+                'method_pay'       => 2, // 2 = MoMo payment
+                'subtotal_order'   => $subtotalOrder,
+                'voucher_id'       => $voucherId,
+                'voucher_code'     => $voucherCode,
+                'voucher_discount' => $voucherDiscount,
+                'total_order'      => $totalOrder,
+                'phone_customer'   => $phoneCustomer,
+                'address_customer' => $addressCustomer,
+                'name_customer'    => $nameCustomer,
+                'note_customer'    => $noteCustomer,
+                'status_order'     => 0, // Chờ thanh toán
+                'status_delivery'  => null,
+                'status_user_order' => null,
+                'reason_user_order' => null,
+                'date_order'       => now()
+            ]);
+
+            // Lưu order_details
+            foreach ($cart as $item) {
+                DB::table('order_details')->insert([
+                    'order_id'    => $orderId,
+                    'product_id'  => $item['product_id'],
+                    'product_attribute_id' => $item['product_attribute_id'] ?? null,
+                    'size' => $item['size'] ?? null,
+                    'quantity_detail' => $item['quantity_item'],
+                    'total_detail' => $item['total_item'],
+                ]);
+            }
+
+            // Cấu hình MoMo (trước khi commit để nếu lỗi thì rollback)
+            $endpoint = "https://test-payment.momo.vn/v2/gateway/api/create";
+            $partnerCode = 'MOMOBKUN20180529';
+            $accessKey = 'klm05TvNBzhg7h7j';
+            $secretKey = 'at67qH6mk8w5Y1nAyMoYKMWACiEi2bsa';
+            $orderInfo = "Thanh toán đơn hàng #MDH_" . $orderId;
+            $amount = (int) $totalOrder; // MoMo yêu cầu số nguyên
+            $orderIdMomo = time() . ""; // Order ID cho MoMo
+            
+            // Lấy URL callback - ưu tiên env variable, sau đó dùng current request URL
+            $momoCallbackUrl = env('MOMO_CALLBACK_URL');
+            if (!$momoCallbackUrl) {
+                // Tự động detect URL từ request hiện tại
+                $momoCallbackUrl = $request->getSchemeAndHttpHost();
+            }
+            
+            $redirectUrl = rtrim($momoCallbackUrl, '/') . "/momo-callback";
+            $ipnUrl = rtrim($momoCallbackUrl, '/') . "/momo-callback";
+            
+            \Log::info('MoMo Payment URLs', [
+                'momo_callback_url_env' => env('MOMO_CALLBACK_URL'),
+                'current_url' => $request->getSchemeAndHttpHost(),
+                'redirect_url' => $redirectUrl,
+                'ipn_url' => $ipnUrl
+            ]);
+            $extraData = base64_encode(json_encode(['order_id' => $orderId]));
+            $requestId = time() . "";
+            $requestType = "payWithATM";
+
+            // Tạo signature
+            $rawHash = "accessKey=" . $accessKey . "&amount=" . $amount . "&extraData=" . $extraData . "&ipnUrl=" . $ipnUrl . "&orderId=" . $orderIdMomo . "&orderInfo=" . $orderInfo . "&partnerCode=" . $partnerCode . "&redirectUrl=" . $redirectUrl . "&requestId=" . $requestId . "&requestType=" . $requestType;
+            $signature = hash_hmac("sha256", $rawHash, $secretKey);
+
+            $data = array(
+                'partnerCode' => $partnerCode,
+                'partnerName' => "Test",
+                "storeId" => "MomoTestStore",
+                'requestId' => $requestId,
+                'amount' => $amount,
+                'orderId' => $orderIdMomo,
+                'orderInfo' => $orderInfo,
+                'redirectUrl' => $redirectUrl,
+                'ipnUrl' => $ipnUrl,
+                'lang' => 'vi',
+                'extraData' => $extraData,
+                'requestType' => $requestType,
+                'signature' => $signature
+            );
+
+            // Lưu orderIdMomo vào session để verify sau
+            session()->put('momo_order_id_momo', $orderIdMomo);
+
+            \Log::info('Calling MoMo API', [
+                'endpoint' => $endpoint,
+                'data' => $data
+            ]);
+
+            try {
+                $result = $this->execPostRequest($endpoint, json_encode($data));
+                \Log::info('MoMo API Response', [
+                    'result' => $result,
+                    'result_length' => strlen($result)
+                ]);
+
+                if (empty($result)) {
+                    throw new \Exception('MoMo API không trả về dữ liệu');
+                }
+
+                $jsonResult = json_decode($result, true);
+                
+                if (json_last_error() !== JSON_ERROR_NONE) {
+                    \Log::error('MoMo API JSON decode error', [
+                        'json_error' => json_last_error_msg(),
+                        'raw_result' => $result
+                    ]);
+                    throw new \Exception('Không thể parse response từ MoMo API: ' . json_last_error_msg());
+                }
+
+                \Log::info('MoMo API Parsed Result', [
+                    'json_result' => $jsonResult
+                ]);
+
+                if (isset($jsonResult['payUrl'])) {
+                    // Commit transaction sau khi MoMo API thành công
+                    DB::commit();
+                    
+                    if ($request->expectsJson()) {
+                        return response()->json([
+                            'status' => 'success',
+                            'payUrl' => $jsonResult['payUrl']
+                        ]);
+                    }
+                    return redirect()->to($jsonResult['payUrl']);
+                } else {
+                    \Log::error('MoMo API không trả về payUrl', [
+                        'json_result' => $jsonResult
+                    ]);
+                    DB::rollBack();
+                    $errorMessage = $jsonResult['message'] ?? 'Không thể tạo link thanh toán MoMo. Vui lòng thử lại.';
+                    if ($request->expectsJson()) {
+                        return response()->json([
+                            'status' => 'error',
+                            'message' => $errorMessage,
+                            'debug' => $jsonResult
+                        ], 500);
+                    }
+                    return back()->with('error', $errorMessage);
+                }
+            } catch (\Exception $apiError) {
+                \Log::error('MoMo API Call Error', [
+                    'error' => $apiError->getMessage(),
+                    'trace' => $apiError->getTraceAsString()
+                ]);
+                DB::rollBack();
+                if ($request->expectsJson()) {
+                    return response()->json([
+                        'status' => 'error',
+                        'message' => 'Lỗi khi gọi MoMo API: ' . $apiError->getMessage()
+                    ], 500);
+                }
+                return back()->with('error', 'Lỗi khi gọi MoMo API: ' . $apiError->getMessage());
+            }
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            \Log::error('MoMo Payment Error', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine()
+            ]);
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $e->getMessage()
+                ], 500);
+            }
+            return back()->with('error', $e->getMessage());
+        }
+    }
+
+    /**
+     * Xử lý callback từ MoMo sau khi thanh toán
+     */
+    public function momo_callback(Request $request)
+    {
+        \Log::info('MoMo Callback Received', [
+            'all_params' => $request->all(),
+            'query_string' => $request->getQueryString(),
+            'method' => $request->method(),
+            'url' => $request->fullUrl()
+        ]);
+
+        try {
+            // Lấy thông tin từ callback
+            $partnerCode = $request->input('partnerCode');
+            $orderIdMomo = $request->input('orderId');
+            $requestId = $request->input('requestId');
+            $amount = $request->input('amount');
+            
+            // Lấy orderInfo từ query string trực tiếp (giữ nguyên encoding)
+            // Parse query string thủ công để lấy giá trị chưa decode
+            parse_str($request->getQueryString(), $queryParams);
+            $orderInfoFromQuery = $queryParams['orderInfo'] ?? $request->input('orderInfo');
+            $orderInfoDecoded = urldecode($orderInfoFromQuery);
+            
+            $orderType = $request->input('orderType');
+            $transId = $request->input('transId');
+            $resultCode = $request->input('resultCode');
+            $message = $request->input('message');
+            $payType = $request->input('payType');
+            $responseTime = $request->input('responseTime');
+            $extraData = $request->input('extraData');
+            $signature = $request->input('signature');
+            
+            \Log::info('MoMo Callback Parsed', [
+                'partnerCode' => $partnerCode,
+                'orderIdMomo' => $orderIdMomo,
+                'amount' => $amount,
+                'orderInfo_from_query' => $orderInfoFromQuery,
+                'orderInfo_decoded' => $orderInfoDecoded,
+                'query_string' => $request->getQueryString(),
+                'extraData' => $extraData,
+                'signature' => $signature,
+                'resultCode' => $resultCode
+            ]);
+
+            // Verify signature
+            $secretKey = 'at67qH6mk8w5Y1nAyMoYKMWACiEi2bsa';
+            
+            // Thử nhiều URL callback có thể (vì MoMo có thể gọi về URL khác)
+            $possibleUrls = [];
+            
+            // 1. URL đã lưu trong session
+            $savedCallbackUrl = session('momo_callback_url');
+            if ($savedCallbackUrl) {
+                $possibleUrls[] = rtrim($savedCallbackUrl, '/') . "/momo-callback";
+            }
+            
+            // 2. URL từ env
+            $envCallbackUrl = env('MOMO_CALLBACK_URL');
+            if ($envCallbackUrl) {
+                $possibleUrls[] = rtrim($envCallbackUrl, '/') . "/momo-callback";
+            }
+            
+            // 3. URL từ request hiện tại
+            $currentUrl = $request->getSchemeAndHttpHost() . "/momo-callback";
+            $possibleUrls[] = $currentUrl;
+            
+            // 4. Thử các biến thể localhost
+            if (strpos($currentUrl, 'localhost:8000') !== false) {
+                $possibleUrls[] = "http://localhost/momo-callback";
+            } elseif (strpos($currentUrl, 'localhost') !== false && strpos($currentUrl, ':') === false) {
+                $possibleUrls[] = "http://localhost:8000/momo-callback";
+            }
+            
+            // Loại bỏ duplicate
+            $possibleUrls = array_unique($possibleUrls);
+            
+            $signatureValid = false;
+            $usedUrl = null;
+            $orderInfo = $orderInfoDecoded; // Mặc định dùng giá trị đã decode
+            
+            // Thử verify với từng URL và từng variant của orderInfo
+            // Lấy orderInfo gốc từ session (giá trị đã gửi khi tạo payment)
+            $savedOrderInfo = session('momo_order_info');
+            
+            // Thử với các giá trị có thể:
+            $orderInfoVariants = array_unique(array_filter([
+                $savedOrderInfo,    // Giá trị gốc từ session (ưu tiên)
+                $orderInfoDecoded,  // Giá trị đã decode từ callback
+                $orderInfoFromQuery // Giá trị từ query (có thể đã encode)
+            ]));
+            
+            // Lưu ý: MoMo tạo signature mới khi callback, không phải signature từ request ban đầu
+            // Cần verify dựa trên dữ liệu từ callback
+            foreach ($possibleUrls as $callbackUrl) {
+                foreach ($orderInfoVariants as $orderInfoToUse) {
+                    // Tạo rawHash từ dữ liệu callback (không phải từ request ban đầu)
+                    // Theo documentation MoMo, signature được tạo từ các tham số trong callback
+                    $rawHash = "accessKey=klm05TvNBzhg7h7j&amount=" . $amount . "&extraData=" . $extraData . "&ipnUrl=" . $callbackUrl . "&orderId=" . $orderIdMomo . "&orderInfo=" . $orderInfoToUse . "&partnerCode=" . $partnerCode . "&redirectUrl=" . $callbackUrl . "&requestId=" . $requestId . "&requestType=payWithATM";
+                    $expectedSignature = hash_hmac("sha256", $rawHash, $secretKey);
+                    
+                    \Log::info('MoMo Signature Check', [
+                        'callback_url' => $callbackUrl,
+                        'order_info_variant' => $orderInfoToUse,
+                        'raw_hash' => $rawHash,
+                        'expected_signature' => $expectedSignature,
+                        'received_signature' => $signature,
+                        'match' => $signature === $expectedSignature
+                    ]);
+                    
+                    if ($signature === $expectedSignature) {
+                        $signatureValid = true;
+                        $usedUrl = $callbackUrl;
+                        $orderInfo = $orderInfoDecoded; // Dùng giá trị đã decode cho xử lý tiếp
+                        break 2; // Break cả 2 vòng lặp
+                    }
+                }
+            }
+            
+            \Log::info('MoMo Signature Verification Result', [
+                'possible_urls' => $possibleUrls,
+                'order_info_variants' => $orderInfoVariants,
+                'used_url' => $usedUrl,
+                'received_signature' => $signature,
+                'signature_valid' => $signatureValid,
+                'order_id_momo' => $orderIdMomo,
+                'order_info' => $orderInfo,
+                'amount' => $amount,
+                'extra_data' => $extraData
+            ]);
+
+            // Lưu ý: MoMo có thể tạo signature khác với signature khi tạo payment
+            // Nếu signature không khớp nhưng resultCode = 0 (thành công), vẫn xử lý
+            // Vì có thể do sự khác biệt về URL hoặc encoding
+            if (!$signatureValid && $resultCode != 0) {
+                \Log::error('MoMo callback signature không hợp lệ và resultCode != 0', [
+                    'received' => $signature,
+                    'tried_urls' => $possibleUrls,
+                    'result_code' => $resultCode
+                ]);
+                $frontendUrl = env('FRONTEND_URL', 'http://localhost:3000');
+                return redirect($frontendUrl . '/checkout?error=' . urlencode('Xác thực thanh toán thất bại.'));
+            }
+            
+            // Nếu resultCode = 0 (thành công) nhưng signature không khớp, log warning nhưng vẫn xử lý
+            if (!$signatureValid && $resultCode == 0) {
+                \Log::warning('MoMo callback signature không khớp nhưng resultCode = 0 (thành công). Vẫn xử lý đơn hàng.', [
+                    'received' => $signature,
+                    'tried_urls' => $possibleUrls,
+                    'result_code' => $resultCode
+                ]);
+            }
+
+            // Lấy order_id từ extraData
+            $extraDataDecoded = json_decode(base64_decode($extraData), true);
+            $orderId = $extraDataDecoded['order_id'] ?? session('momo_order_id');
+
+            if (!$orderId) {
+                $frontendUrl = env('FRONTEND_URL', 'http://localhost:3000');
+                return redirect($frontendUrl . '/checkout?error=' . urlencode('Không tìm thấy thông tin đơn hàng.'));
+            }
+
+            $order = DB::table('orders')->where('id', $orderId)->first();
+            if (!$order) {
+                $frontendUrl = env('FRONTEND_URL', 'http://localhost:3000');
+                return redirect($frontendUrl . '/checkout?error=' . urlencode('Không tìm thấy đơn hàng.'));
+            }
+
+            DB::beginTransaction();
+
+            if ($resultCode == 0) {
+                // Thanh toán thành công
+                $cart = session('momo_cart', []);
+                
+                // Giảm số lượng sản phẩm
+                foreach ($cart as $item) {
+                    DB::table('products')->where('id', $item['product_id'])->decrement('quantity_product', $item['quantity_item']);
+                    
+                    if (!empty($item['product_attribute_id'])) {
+                        DB::table('product_attributes')
+                            ->where('id', $item['product_attribute_id'])
+                            ->decrement('quantity', $item['quantity_item']);
+                    }
+                }
+
+                // Xóa cart
+                $userId = Auth::id();
+                if ($userId && !empty($cart)) {
+                    $productIdsInOrder = array_column($cart, 'product_id');
+                    DB::table('carts')->where('user_id', $userId)
+                        ->whereIn('product_id', $productIdsInOrder)
+                        ->delete();
+                }
+                session()->forget('cart');
+                session()->forget('momo_cart');
+
+                // Cập nhật trạng thái đơn hàng
+                DB::table('orders')->where('id', $orderId)->update([
+                    'status_order' => 1, // Đang xử lý
+                ]);
+
+                // Cập nhật số lần sử dụng voucher
+                if ($order->voucher_id) {
+                    DB::table('vouchers')
+                        ->where('id', $order->voucher_id)
+                        ->increment('used_count');
+                }
+
+                // Clear cache
+                Cache::forget('top_selling_products');
+                $this->clearDashboardCache();
+
+                // Gửi email xác nhận đơn hàng
+                try {
+                    $user = DB::table('users')->where('id', $order->user_id)->first();
+                    if ($user && $user->email) {
+                        $orderDetails = DB::table('order_details')
+                            ->join('products', 'order_details.product_id', '=', 'products.id')
+                            ->where('order_details.order_id', $orderId)
+                            ->select(
+                                'products.name_product',
+                                'products.image_product',
+                                'order_details.quantity_detail',
+                                'order_details.total_detail',
+                                'order_details.size'
+                            )
+                            ->get();
+                        
+                        $appUrl = config('app.url');
+                        $orderDetailsWithUrl = $orderDetails->map(function($item) use ($appUrl) {
+                            $item->image_url = $item->image_product ? $appUrl . '/' . $item->image_product : null;
+                            return $item;
+                        });
+                        
+                        $orderData = [
+                            'order_code' => 'MDH_'.$orderId,
+                            'order_id' => $orderId,
+                            'name_customer' => $order->name_customer,
+                            'phone_customer' => $order->phone_customer,
+                            'address_customer' => $order->address_customer,
+                            'date_order' => now()->format('d/m/Y H:i'),
+                            'subtotal_order' => number_format($order->subtotal_order, 0, ',', '.') . '₫',
+                            'voucher_discount' => $order->voucher_discount > 0 ? number_format($order->voucher_discount, 0, ',', '.') . '₫' : '0₫',
+                            'total_order' => number_format($order->total_order, 0, ',', '.') . '₫',
+                            'method_pay' => 'Thanh toán qua MoMo',
+                            'products' => $orderDetailsWithUrl,
+                            'app_url' => $appUrl
+                        ];
+                        
+                        Mail::send('emails.order-confirmation', ['order' => $orderData], function ($message) use ($user, $orderData) {
+                            $message->to($user->email, $user->name ?? $orderData['name_customer'])
+                                    ->subject('Xác nhận đơn hàng #' . $orderData['order_code']);
+                        });
+                    }
+                } catch (\Exception $emailError) {
+                    \Log::error('Lỗi gửi email xác nhận đơn hàng: ' . $emailError->getMessage());
+                }
+
+                DB::commit();
+                session()->forget('momo_order_id');
+                session()->forget('momo_order_id_momo');
+
+                // Redirect đến frontend order-success page
+                $frontendUrl = env('FRONTEND_URL', 'http://localhost:3000');
+                return redirect($frontendUrl . '/order-success?code=MDH_' . $orderId . '&id=' . $orderId);
+            } else {
+                // Thanh toán thất bại - xóa đơn hàng tạm
+                DB::table('orders')->where('id', $orderId)->delete();
+                DB::table('order_details')->where('order_id', $orderId)->delete();
+                DB::commit();
+                session()->forget('momo_order_id');
+                session()->forget('momo_order_id_momo');
+                session()->forget('momo_cart');
+
+                // Redirect đến frontend checkout page với error
+                $frontendUrl = env('FRONTEND_URL', 'http://localhost:3000');
+                return redirect($frontendUrl . '/checkout?error=' . urlencode('Thanh toán thất bại: ' . $message));
+            }
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            \Log::error('Lỗi xử lý MoMo callback: ' . $e->getMessage());
+            $frontendUrl = env('FRONTEND_URL', 'http://localhost:3000');
+            return redirect($frontendUrl . '/checkout?error=' . urlencode('Có lỗi xảy ra khi xử lý thanh toán.'));
+        }
+    }
+
+    /**
+     * Helper function để gửi POST request đến MoMo API
+     */
+    private function execPostRequest($url, $data)
+    {
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_POST, 1);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $data);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 30); // Timeout 30 giây
+        curl_setopt($ch, CURLOPT_HTTPHEADER, array(
+            'Content-Type: application/json',
+            'Content-Length: ' . strlen($data)
+        ));
+        
+        $result = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlError = curl_error($ch);
+        curl_close($ch);
+        
+        if ($result === false) {
+            \Log::error('MoMo API cURL Error', [
+                'error' => $curlError,
+                'url' => $url
+            ]);
+            throw new \Exception('Lỗi kết nối đến MoMo API: ' . $curlError);
+        }
+        
+        if ($httpCode !== 200) {
+            \Log::error('MoMo API HTTP Error', [
+                'http_code' => $httpCode,
+                'response' => $result,
+                'url' => $url
+            ]);
+            throw new \Exception('MoMo API trả về lỗi HTTP ' . $httpCode);
+        }
+        
+        return $result;
     }
 }

@@ -2,14 +2,97 @@ import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { ClipLoader } from 'react-spinners'
 import { FaBox, FaShoppingBag, FaUsers, FaDollarSign } from 'react-icons/fa'
+import { 
+  LineChart, 
+  Line, 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  Legend, 
+  ResponsiveContainer 
+} from 'recharts'
 import { axiosInstance } from '../../utils/axiosConfig'
 import { formatCurrency } from '../../utils/formatCurrency'
+
+// Helper function to get date 7 days ago
+const get7DaysAgoDate = () => {
+  const date = new Date()
+  date.setDate(date.getDate() - 6) // 6 days ago + today = 7 days
+  return date.toISOString().split('T')[0]
+}
+
+// Helper function to get current date
+const getCurrentDateString = () => {
+  const now = new Date()
+  return now.toISOString().split('T')[0]
+}
+
+// Helper function to get current month in YYYY-MM format
+const getCurrentMonth = () => {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  return `${year}-${month}`
+}
+
+// Helper function to calculate start_date and end_date from filterDate and timePeriod
+const getDateRange = (date, period) => {
+  if (!date) {
+    // Nếu không có filter, mặc định tháng hiện tại
+    if (period === 'month') {
+      const currentMonth = getCurrentMonth()
+      const dateObj = new Date(currentMonth + '-01')
+      const startDate = new Date(dateObj.getFullYear(), dateObj.getMonth(), 1)
+      const endDate = new Date(dateObj.getFullYear(), dateObj.getMonth() + 1, 0)
+      return {
+        startDate: startDate.toISOString().split('T')[0],
+        endDate: endDate.toISOString().split('T')[0]
+      }
+    }
+    // Nếu không có filter và không phải month, mặc định 7 ngày gần nhất
+    return {
+      startDate: get7DaysAgoDate(),
+      endDate: getCurrentDateString()
+    }
+  }
+
+  if (period === 'day') {
+    return {
+      startDate: date,
+      endDate: date
+    }
+  } else if (period === 'month') {
+    const dateObj = new Date(date + '-01')
+    const startDate = new Date(dateObj.getFullYear(), dateObj.getMonth(), 1)
+    const endDate = new Date(dateObj.getFullYear(), dateObj.getMonth() + 1, 0)
+    return {
+      startDate: startDate.toISOString().split('T')[0],
+      endDate: endDate.toISOString().split('T')[0]
+    }
+  } else if (period === 'year') {
+    const year = parseInt(date)
+    return {
+      startDate: `${year}-01-01`,
+      endDate: `${year}-12-31`
+    }
+  }
+  
+  return {
+    startDate: get7DaysAgoDate(),
+    endDate: getCurrentDateString()
+  }
+}
 
 const AdminDashboard = () => {
   const [loading, setLoading] = useState(true)
   const [revenue, setRevenue] = useState(null)
-  const [filterDate, setFilterDate] = useState('')
-  const [timePeriod, setTimePeriod] = useState('day')
+  const [filterDate, setFilterDate] = useState(getCurrentMonth())
+  const [timePeriod, setTimePeriod] = useState('month')
+  const [chartData, setChartData] = useState([])
+  const [chartLoading, setChartLoading] = useState(false)
 
   const fetchDashboardData = useCallback(async () => {
     try {
@@ -44,17 +127,44 @@ const AdminDashboard = () => {
     }
   }, [filterDate, timePeriod])
 
+  // Fetch chart data dựa trên filter chung
+  const fetchChartData = useCallback(async () => {
+    try {
+      setChartLoading(true)
+      
+      const { startDate, endDate } = getDateRange(filterDate, timePeriod)
+      const params = {
+        start_date: startDate,
+        end_date: endDate
+      }
+      
+      const response = await axiosInstance.get('/admin/revenue/last-7-days', { params })
+      if (response.data.status === 'success') {
+        setChartData(response.data.data.chart_data || [])
+      }
+    } catch (error) {
+      console.error('Lỗi khi tải dữ liệu chart:', error)
+    } finally {
+      setChartLoading(false)
+    }
+  }, [filterDate, timePeriod])
+
   useEffect(() => {
     fetchDashboardData()
   }, [fetchDashboardData])
 
+  useEffect(() => {
+    fetchChartData()
+  }, [fetchChartData])
+
   const handleFilterChange = () => {
     fetchDashboardData()
+    fetchChartData()
   }
 
   const handleResetFilter = () => {
-    setFilterDate('')
-    setTimePeriod('day')
+    setFilterDate(getCurrentMonth())
+    setTimePeriod('month')
   }
 
   // Get current date for default value
@@ -389,48 +499,143 @@ const AdminDashboard = () => {
             })}
           </div>
 
-          {/* Filter Info */}
-          {revenue && revenue.filter && (
-            <div style={{
-              backgroundColor: '#fff',
-              padding: '20px 24px',
-              borderRadius: '12px',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
-              border: '1px solid rgba(0,0,0,0.05)',
-              marginBottom: '24px'
+        
+          {/* Chart Section - Thống kê theo filter */}
+          <div style={{
+            backgroundColor: '#fff',
+            padding: '32px',
+            borderRadius: '16px',
+            boxShadow: '0 2px 12px rgba(0,0,0,0.08)',
+            border: '1px solid rgba(0,0,0,0.05)',
+            marginBottom: '24px',
+            position: 'relative'
+          }}>
+            <h2 style={{ 
+              fontSize: '2.2rem', 
+              marginBottom: '24px', 
+              color: '#1a1a1a',
+              fontWeight: '700'
             }}>
+              Thống kê đơn hàng
+            </h2>
+
+            {chartLoading ? (
               <div style={{
                 display: 'flex',
-                justifyContent: 'space-between',
+                justifyContent: 'center',
                 alignItems: 'center',
-                flexWrap: 'wrap',
-                gap: '16px'
+                minHeight: '400px',
+                gap: '15px'
               }}>
-                <div>
-                  <p style={{ fontSize: '1.4rem', color: '#666', margin: '0 0 4px 0', fontWeight: '500' }}>
-                    Thông tin lọc:
-                  </p>
-                  <p style={{ fontSize: '1.6rem', color: '#333', margin: 0, fontWeight: '600' }}>
-                    {revenue.filter.period === 'day' ? 'Theo ngày' : 
-                     revenue.filter.period === 'month' ? 'Theo tháng' : 
-                     revenue.filter.period === 'year' ? 'Theo năm' : 
-                     revenue.filter.period || '-'} - {revenue.filter.date || '-'}
-                  </p>
-                </div>
-                {revenue.filter.note && (
-                  <p style={{ 
-                    fontSize: '1.3rem', 
-                    color: '#666', 
-                    margin: 0,
-                    fontStyle: 'italic',
-                    maxWidth: '500px'
-                  }}>
-                    {revenue.filter.note}
-                  </p>
-                )}
+                <ClipLoader color="#1976d2" size={40} />
+                <p style={{ fontSize: '1.4rem', color: '#666' }}>
+                  Đang tải dữ liệu chart...
+                </p>
               </div>
-            </div>
-          )}
+            ) : chartData.length > 0 ? (
+              <div>
+                {/* Line Chart - Doanh thu */}
+                <div style={{ marginBottom: '40px' }}>
+                  <h3 style={{ 
+                    fontSize: '1.8rem', 
+                    marginBottom: '20px', 
+                    color: '#333',
+                    fontWeight: '600'
+                  }}>
+                    Doanh thu theo ngày
+                  </h3>
+                  <ResponsiveContainer width="100%" height={300}>
+                    <LineChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+                      <XAxis 
+                        dataKey="date_label" 
+                        stroke="#666"
+                        style={{ fontSize: '1.2rem' }}
+                      />
+                      <YAxis 
+                        stroke="#666"
+                        style={{ fontSize: '1.2rem' }}
+                        tickFormatter={(value) => `${(value / 1000000).toFixed(1)}M`}
+                      />
+                      <Tooltip 
+                        contentStyle={{
+                          backgroundColor: '#fff',
+                          border: '1px solid #e0e0e0',
+                          borderRadius: '8px',
+                          fontSize: '1.3rem'
+                        }}
+                        formatter={(value) => formatCurrency(value)}
+                      />
+                      <Legend 
+                        wrapperStyle={{ fontSize: '1.3rem' }}
+                      />
+                      <Line 
+                        type="monotone" 
+                        dataKey="total_revenue" 
+                        stroke="#1976d2" 
+                        strokeWidth={3}
+                        name="Doanh thu"
+                        dot={{ r: 5 }}
+                        activeDot={{ r: 8 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+
+                {/* Bar Chart - Số đơn hàng */}
+                <div>
+                  <h3 style={{ 
+                    fontSize: '1.8rem', 
+                    marginBottom: '20px', 
+                    color: '#333',
+                    fontWeight: '600'
+                  }}>
+                    Số đơn hàng theo trạng thái
+                  </h3>
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+                      <XAxis 
+                        dataKey="date_label" 
+                        stroke="#666"
+                        style={{ fontSize: '1.2rem' }}
+                      />
+                      <YAxis 
+                        stroke="#666"
+                        style={{ fontSize: '1.2rem' }}
+                      />
+                      <Tooltip 
+                        contentStyle={{
+                          backgroundColor: '#fff',
+                          border: '1px solid #e0e0e0',
+                          borderRadius: '8px',
+                          fontSize: '1.3rem'
+                        }}
+                      />
+                      <Legend 
+                        wrapperStyle={{ fontSize: '1.3rem' }}
+                      />
+                      <Bar dataKey="total_orders" fill="#28a745" name="Tổng đơn hàng" />
+                      <Bar dataKey="completed_orders" fill="#198754" name="Đã hoàn thành" />
+                      <Bar dataKey="processing_orders" fill="#ffc107" name="Đang xử lý" />
+                      <Bar dataKey="pending_orders" fill="#dc3545" name="Chờ xử lý" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            ) : (
+              <div style={{
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                minHeight: '400px',
+                color: '#666',
+                fontSize: '1.4rem'
+              }}>
+                Không có dữ liệu để hiển thị
+              </div>
+            )}
+          </div>
 
           {/* Top Products */}
           {revenue && revenue.top_products && revenue.top_products.length > 0 && (

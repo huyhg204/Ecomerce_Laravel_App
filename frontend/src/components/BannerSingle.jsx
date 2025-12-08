@@ -22,52 +22,57 @@ const BannerSingle = () => {
       if (response.data.status === 'success') {
         const bannersData = response.data.data || []
         const bannersArray = Array.isArray(bannersData) ? bannersData : []
-        // Lấy banner đầu tiên đang hoạt động và có ảnh
         const activeBanner = bannersArray.find(b => b.status === 1 && b.image)
         
         if (activeBanner) {
           setBanner({
             id: activeBanner.id,
-            badge: activeBanner.badge || 'Danh mục',
+            badge: activeBanner.badge || 'Trending',
             title: activeBanner.title || '',
             description: activeBanner.description || '',
             image: getImageUrl(activeBanner.image),
-            link: activeBanner.link || '/collections/featured'
+            link: activeBanner.link || '/products'
           })
         } else {
-          // Fallback banner nếu không có
-          setBanner(null)
+          handleFallback()
         }
+      } else {
+        handleFallback()
       }
     } catch (error) {
       console.error('Lỗi khi lấy banner:', error)
-      setBanner(null)
+      handleFallback()
     } finally {
       setLoading(false)
     }
   }
 
-  // Nếu không có banner, không hiển thị gì cả
+  // Dữ liệu mặc định nếu API lỗi hoặc chưa có banner (Giống thiết kế trong ảnh)
+  const handleFallback = () => {
+    setBanner({
+      id: 'fallback',
+      badge: 'New Style',
+      title: 'Nâng Tầm Phong Cách Của Bạn',
+      description: 'Khám phá bộ sưu tập thời trang đường phố độc đáo, thể hiện cá tính riêng biệt của Gen Z.',
+      // Ảnh fashion ngầu, nền tối phù hợp với banner đen
+      image: 'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=1200&q=80',
+      link: '/products'
+    })
+  }
+
   if (loading) {
     return (
       <section className="section">
         <div className="container">
-          <div style={{ 
-            display: 'flex', 
-            justifyContent: 'center', 
-            alignItems: 'center',
-            minHeight: '200px'
-          }}>
-            <ClipLoader color="#1976d2" size={30} />
+          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '200px' }}>
+            <ClipLoader color="#d32f2f" size={30} />
           </div>
         </div>
       </section>
     )
   }
 
-  if (!banner) {
-    return null // Không hiển thị nếu không có banner
-  }
+  if (!banner) return null
 
   return (
     <section className="section">
@@ -78,11 +83,11 @@ const BannerSingle = () => {
             {banner.title && <h2 className="trending_title">{banner.title}</h2>}
             {banner.description && (
               <div className="trending_stats" style={{ marginTop: '20px' }}>
-                <p style={{ fontSize: '1.4rem', color: '#666' }}>{banner.description}</p>
+                <p style={{ fontSize: '1.4rem', color: '#ccc', lineHeight: '1.6' }}>{banner.description}</p>
               </div>
             )}
             <Link to={banner.link} className="trending_btn">
-              Mua ngay
+              MUA NGAY
             </Link>
           </div>
           {banner.image && (
@@ -90,6 +95,7 @@ const BannerSingle = () => {
               src={banner.image}
               alt={banner.title || 'Banner'}
               className="trending_img"
+              style={{ objectFit: 'cover' }}
             />
           )}
         </div>

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { FaBars, FaSearch, FaHeart, FaShoppingCart, FaUser } from 'react-icons/fa'
 import { authService } from '../utils/authService'
-import { axiosInstance } from '../utils/axiosConfig'
+import { axiosInstance } from '../utils/axiosConfig' // Đảm bảo import axiosInstance
 
 const Nav = () => {
   const navigate = useNavigate()
@@ -11,38 +11,98 @@ const Nav = () => {
   const [user, setUser] = useState(null)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
 
+  // State quản lý số lượng badge
+  const [cartCount, setCartCount] = useState(0)
+  const [wishlistCount, setWishlistCount] = useState(0)
+
   useEffect(() => {
     checkAuth()
+    
+    // Lần đầu load trang: Nếu đã login thì lấy số lượng ngay
     if (authService.isAuthenticated()) {
       fetchUser()
+      fetchCounts() 
+    } else {
+      setCartCount(0)
+      setWishlistCount(0)
     }
     
-    // Listen for storage changes (when user logs in/out in another tab)
+    // Listen for storage changes
     const handleStorageChange = (e) => {
       if (e.key === 'access_token' || e.key === 'user') {
         checkAuth()
         if (authService.isAuthenticated()) {
           fetchUser()
+          fetchCounts()
         }
       }
     }
     
-    // Listen for custom auth event (when user logs in/out in same tab)
+    // Listen for custom auth event
     const handleAuthChange = () => {
       checkAuth()
       if (authService.isAuthenticated()) {
         fetchUser()
+        fetchCounts()
       }
     }
-    
+
+    // --- LOGIC LẮNG NGHE SỰ KIỆN CẬP NHẬT GIỎ HÀNG/WISHLIST ---
+    const handleUpdateCart = () => fetchCartCount()
+    const handleUpdateWishlist = () => fetchWishlistCount()
+    const handleUpdateAll = () => fetchCounts()
+
     window.addEventListener('storage', handleStorageChange)
     window.addEventListener('authStateChanged', handleAuthChange)
+    // Đăng ký lắng nghe sự kiện custom
+    window.addEventListener('updateCartCount', handleUpdateCart)
+    window.addEventListener('updateWishlistCount', handleUpdateWishlist)
     
     return () => {
       window.removeEventListener('storage', handleStorageChange)
       window.removeEventListener('authStateChanged', handleAuthChange)
+      window.removeEventListener('updateCartCount', handleUpdateCart)
+      window.removeEventListener('updateWishlistCount', handleUpdateWishlist)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // --- HÀM GỌI API LẤY SỐ LƯỢNG ---
+  const fetchCartCount = async () => {
+    if (!authService.isAuthenticated()) return
+    try {
+      const response = await axiosInstance.get('/cart')
+      if (response.data.status === 'success' && response.data.data?.cart) {
+        // Tính tổng số lượng sản phẩm (ví dụ: mua 2 áo + 1 quần = 3)
+        const totalItems = response.data.data.cart.reduce((sum, item) => sum + item.quantity_item, 0)
+        setCartCount(totalItems)
+      } else {
+        setCartCount(0)
+      }
+    } catch (error) {
+      console.error('Lỗi cập nhật giỏ hàng:', error)
+    }
+  }
+
+  const fetchWishlistCount = async () => {
+    if (!authService.isAuthenticated()) return
+    try {
+      const response = await axiosInstance.get('/user/wishlist')
+      if (response.data.status === 'success') {
+        setWishlistCount(response.data.data.length)
+      } else {
+        setWishlistCount(0)
+      }
+    } catch (error) {
+      console.error('Lỗi cập nhật wishlist:', error)
+    }
+  }
+
+  const fetchCounts = () => {
+    fetchCartCount()
+    fetchWishlistCount()
+  }
+  // ------------------------------------
 
   const checkAuth = () => {
     setIsAuthenticated(authService.isAuthenticated())
@@ -72,6 +132,8 @@ const Nav = () => {
       setIsAuthenticated(false)
       setUser(null)
       setIsUserMenuOpen(false)
+      setCartCount(0) // Reset badge
+      setWishlistCount(0) // Reset badge
       navigate('/')
       window.location.reload()
     }
@@ -111,6 +173,23 @@ const Nav = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [isUserMenuOpen])
 
+  // Style cho badge thông báo
+  const badgeStyle = {
+    position: 'absolute',
+    top: '-8px',
+    right: '-8px',
+    color: 'white',
+    borderRadius: '50%',
+    width: '18px',
+    height: '18px',
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    fontSize: '10px',
+    fontWeight: 'bold',
+    border: '1px solid #fff'
+  }
+
   return (
     <div>
       <div className="top_nav">
@@ -128,7 +207,7 @@ const Nav = () => {
       <nav className="nav">
         <div className="container nav_container">
           <Link to="/" className="nav_logo">
-            EXCLUSIVE
+            SAIGONGENZ
           </Link>
           <ul className="nav_list">
             <li className="nav_item">
@@ -172,9 +251,17 @@ const Nav = () => {
                 <FaSearch className="nav_search" />
               </button>
             </form>
-            <Link to="/wishlist" className="nav_heart" aria-label="Danh sách yêu thích">
+            
+            {/* ICON WISHLIST CÓ BADGE */}
+            <Link to="/wishlist" className="nav_heart" aria-label="Danh sách yêu thích" style={{ position: 'relative' }}>
               <FaHeart />
+              {wishlistCount > 0 && (
+                <span style={{ ...badgeStyle, backgroundColor: '#d32f2f' }}>
+                  {wishlistCount > 99 ? '99+' : wishlistCount}
+                </span>
+              )}
             </Link>
+
             {isAuthenticated ? (
               <div className="nav_user_wrapper">
                 <button
@@ -231,8 +318,15 @@ const Nav = () => {
                 <FaUser className="nav_user" />
               </Link>
             )}
-            <Link to="/cart" className="nav_cart" aria-label="Giỏ hàng">
+
+            {/* ICON CART CÓ BADGE */}
+            <Link to="/cart" className="nav_cart" aria-label="Giỏ hàng" style={{ position: 'relative' }}>
               <FaShoppingCart />
+              {cartCount > 0 && (
+                <span style={{ ...badgeStyle, backgroundColor: '#1976d2' }}>
+                  {cartCount > 99 ? '99+' : cartCount}
+                </span>
+              )}
             </Link>
           </div>
           <span className="hamburger">

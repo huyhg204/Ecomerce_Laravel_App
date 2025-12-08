@@ -34,6 +34,11 @@ Route::post('/cart', [OrderController::class, 'createOrder']);
 Route::post('/cart/add', [CartController::class, 'addToCart'])->name('addToCart');
 Route::post('/cart/remove', [CartController::class, 'removeFromCart'])->name('removeFromCart');
 
+// MoMo Payment Routes
+Route::post('/momo_payment', [OrderController::class, 'momo_payment'])->name('momo.payment');
+Route::get('/momo-callback', [OrderController::class, 'momo_callback'])->name('momo.callback');
+Route::post('/momo-callback', [OrderController::class, 'momo_callback'])->name('momo.callback.post');
+
 
 Route::middleware([checkRoleUser::class])->prefix('user/orders')->name('user.orders.')->group(function() {
     Route::get('/', [OrderController::class, 'indexUser'])->name('index');

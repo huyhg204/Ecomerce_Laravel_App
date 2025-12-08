@@ -2,10 +2,9 @@ import React, { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ClipLoader } from 'react-spinners'
-import { FaTrash, FaEye, FaHeart, FaShoppingCart, FaStar } from 'react-icons/fa'
+import { FaTrash, FaEye, FaHeart, FaStar } from 'react-icons/fa'
 import { formatCurrency } from '../utils/formatCurrency'
 import { axiosInstance } from '../utils/axiosConfig'
-import { cartService } from '../utils/cartService'
 import { authService } from '../utils/authService'
 
 const WishList = () => {
@@ -85,6 +84,10 @@ const WishList = () => {
       await axiosInstance.delete(`/user/wishlist/${id}`)
       setWishlistItems(wishlistItems.filter((item) => item.id !== id))
       toast.success('Đã xóa khỏi danh sách yêu thích')
+      
+      // *** CẬP NHẬT BADGE WISHLIST TRÊN NAV ***
+      window.dispatchEvent(new Event('updateWishlistCount'))
+
     } catch (error) {
       toast.error('Không thể xóa sản phẩm', {
         description: error.response?.data?.message || 'Vui lòng thử lại sau.',
@@ -92,43 +95,7 @@ const WishList = () => {
     }
   }
 
-  const handleMoveAllToBag = async () => {
-    if (!authService.isAuthenticated()) {
-      navigate('/login')
-      return
-    }
 
-    try {
-      for (const item of wishlistItems) {
-        await cartService.addToCart(item.id, 1)
-      }
-      toast.success('Đã thêm tất cả vào giỏ hàng!', {
-        description: `${wishlistItems.length} sản phẩm đã được thêm vào giỏ hàng.`,
-      })
-    } catch (error) {
-      toast.error('Không thể thêm tất cả vào giỏ hàng', {
-        description: 'Vui lòng thử lại sau.',
-      })
-    }
-  }
-
-  const handleAddToCart = async (product) => {
-    if (!authService.isAuthenticated()) {
-      navigate('/login')
-      return
-    }
-
-    try {
-      await cartService.addToCart(product.id, 1)
-      toast.success('Đã thêm vào giỏ hàng!', {
-        description: `${product.title || product.name_product} đã được thêm vào giỏ hàng.`,
-      })
-    } catch (error) {
-      toast.error('Không thể thêm vào giỏ hàng', {
-        description: error.message || 'Vui lòng thử lại sau.',
-      })
-    }
-  }
 
   return (
     <div>
@@ -155,11 +122,6 @@ const WishList = () => {
           )}
           <div className="wishlist_header">
             <h2 className="wishlist_title">Danh sách yêu thích ({wishlistItems.length})</h2>
-            {wishlistItems.length > 0 && (
-              <button className="wishlist_move_all_btn" onClick={handleMoveAllToBag}>
-                Chuyển tất cả vào giỏ hàng
-              </button>
-            )}
           </div>
 
           {loading ? (
@@ -222,12 +184,19 @@ const WishList = () => {
                         </p>
                       )}
                     </div>
-                    <button
+                    <Link
+                      to={`/products/${product.product_id || product.id}`}
                       className="add_to_cart wishlist_add_to_cart"
-                      onClick={() => handleAddToCart(product)}
+                      style={{
+                        textDecoration: 'none',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px'
+                      }}
                     >
-                      <FaShoppingCart /> Thêm vào giỏ hàng
-                    </button>
+                      <FaEye /> Xem chi tiết
+                    </Link>
                   </div>
                 </div>
               ))}
@@ -305,12 +274,18 @@ const WishList = () => {
                       </div>
                       <p className="card_rating_numbers">({product.reviews})</p>
                     </div>
-                    <button 
+                    <Link
+                      to={`/products/${product.id}`}
                       className="add_to_cart"
-                      onClick={() => handleAddToCart(product)}
+                      style={{
+                        textDecoration: 'none',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}
                     >
-                      Thêm vào giỏ
-                    </button>
+                      Xem chi tiết
+                    </Link>
                   </div>
                 </div>
               ))}
@@ -323,4 +298,3 @@ const WishList = () => {
 }
 
 export default WishList
-

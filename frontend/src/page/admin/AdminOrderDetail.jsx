@@ -58,12 +58,13 @@ const AdminOrderDetail = () => {
   }
 
   const handleUpdateStatus = async () => {
-    if (!statusForm.status) {
-      toast.error('Vui lòng chọn trạng thái')
+    // Sử dụng nextAvailableStatus thay vì statusForm.status
+    if (!nextAvailableStatus) {
+      toast.error('Không thể cập nhật trạng thái. Đơn hàng đã hoàn thành hoặc đã bị hủy.')
       return
     }
 
-    const statusValue = parseInt(statusForm.status)
+    const statusValue = parseInt(nextAvailableStatus.value)
     if (isNaN(statusValue) || statusValue < 0) {
       toast.error('Trạng thái không hợp lệ')
       return
@@ -84,7 +85,8 @@ const AdminOrderDetail = () => {
           newStatusDelivery = null
         } else if (statusValue >= 3 && statusValue <= 5) {
           newStatusOrder = 2
-          newStatusDelivery = statusValue - 2
+          // unified_status = 3 => status_delivery = 0, unified_status = 4 => status_delivery = 1, unified_status = 5 => status_delivery = 2
+          newStatusDelivery = statusValue - 3
         }
         
         // Cập nhật UI ngay lập tức
@@ -97,10 +99,7 @@ const AdminOrderDetail = () => {
           }
         })
         
-        // Cập nhật statusForm để dropdown cũng cập nhật
-        setStatusForm({
-          status: statusValue.toString()
-        })
+        // Không cập nhật statusForm ở đây vì sẽ được cập nhật tự động qua useEffect khi orderData thay đổi
       }
       
       // Sử dụng API thống nhất để cập nhật trạng thái
@@ -160,8 +159,78 @@ const AdminOrderDetail = () => {
     return { label: 'Không xác định', color: '#6c757d', value: '0' }
   }
 
+  // Hàm tính toán trạng thái tiếp theo có thể chọn
+  const getNextAvailableStatus = (orderData) => {
+    if (!orderData || orderData.status_user_order === 1) {
+      return null // Đã hủy, không thể cập nhật
+    }
+
+    // Tính unified_status hiện tại
+    let currentUnifiedStatus = 0
+    if (orderData.status_order < 2) {
+      currentUnifiedStatus = orderData.status_order
+    } else if (orderData.status_order === 2) {
+      if (orderData.status_delivery === null || orderData.status_delivery === undefined) {
+        currentUnifiedStatus = 2 // Đã giao cho vận chuyển nhưng chưa có trạng thái giao hàng
+      } else {
+        currentUnifiedStatus = 3 + parseInt(orderData.status_delivery) // 3 + 0 = 3, 3 + 1 = 4, 3 + 2 = 5
+      }
+    }
+
+    // Nếu đã đạt trạng thái cuối cùng (5 = Đã giao hàng)
+    if (currentUnifiedStatus >= 5) {
+      return null
+    }
+
+    // Trả về trạng thái tiếp theo (chỉ tăng 1 bước)
+    const nextStatus = currentUnifiedStatus + 1
+
+    // Map unified_status về label
+    const statusLabels = {
+      0: 'Chờ xác nhận',
+      1: 'Đang xử lý',
+      2: 'Đã giao cho bên vận chuyển',
+      3: 'Đã nhận hàng từ kho',
+      4: 'Đang giao hàng',
+      5: 'Đã giao hàng'
+    }
+
+    return {
+      value: nextStatus.toString(),
+      label: statusLabels[nextStatus] || 'Không xác định'
+    }
+  }
+
   // Sử dụng formatDateTime từ dateHelper
   const formatDate = formatDateTime
+
+  // Hàm lấy phương thức thanh toán
+  const getPaymentMethod = (methodPay) => {
+    // method_pay: 0 = cash, 1 = bank, 2 = MoMo
+    const methodMap = {
+      0: 'Thanh toán khi nhận hàng',
+      1: 'Thanh toán qua ngân hàng',
+      2: 'Thanh toán qua MoMo',
+    }
+    return methodMap[methodPay] || 'Không xác định'
+  }
+
+  // Tính toán orderData, unifiedStatus, nextAvailableStatus trước khi render
+  const orderData = order?.order || order
+  const unifiedStatus = orderData ? getUnifiedStatus(orderData) : { label: 'Không xác định', color: '#6c757d', value: '0' }
+  const nextAvailableStatus = orderData ? getNextAvailableStatus(orderData) : null
+  const paymentMethod = orderData ? getPaymentMethod(orderData.method_pay) : null
+  
+  // Cập nhật statusForm khi orderData thay đổi để đồng bộ với trạng thái hiện tại
+  useEffect(() => {
+    if (orderData && !orderData.status_user_order) {
+      const currentUnifiedStatus = getUnifiedStatus(orderData).value
+      if (statusForm.status !== currentUnifiedStatus) {
+        setStatusForm({ status: currentUnifiedStatus })
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderData])
 
   if (loading) {
     return (
@@ -205,9 +274,7 @@ const AdminOrderDetail = () => {
     )
   }
 
-  const orderData = order.order || order
-  const orderDetails = order.details || []
-  const unifiedStatus = getUnifiedStatus(orderData)
+  const orderDetails = order?.details || []
 
   // Hàm render workflow trạng thái đơn hàng
   const renderWorkflow = () => {
@@ -562,6 +629,23 @@ const AdminOrderDetail = () => {
               {formatCurrency(orderData.total_order)}
             </p>
           </div>
+          <div>
+            <p style={{ 
+              fontSize: '1.3rem', 
+              color: '#6c757d', 
+              marginBottom: '8px',
+              fontWeight: '500'
+            }}>
+              Phương thức thanh toán
+            </p>
+            <p style={{ 
+              fontSize: '1.6rem', 
+              fontWeight: '600',
+              color: '#212529'
+            }}>
+              {paymentMethod}
+            </p>
+          </div>
         </div>
 
         {/* Workflow */}
@@ -718,9 +802,9 @@ const AdminOrderDetail = () => {
                 Trạng thái đơn hàng
               </label>
               <select
-                value={statusForm.status}
+                value={nextAvailableStatus ? nextAvailableStatus.value : unifiedStatus.value}
                 onChange={(e) => setStatusForm(prev => ({ ...prev, status: e.target.value }))}
-                disabled={orderData?.status_user_order === 1 || (orderData?.status_order === 2 && orderData?.status_delivery === 2)}
+                disabled={!nextAvailableStatus || orderData?.status_user_order === 1}
                 style={{
                   padding: '12px 16px',
                   fontSize: '1.4rem',
@@ -729,12 +813,12 @@ const AdminOrderDetail = () => {
                   outline: 'none',
                   minWidth: '280px',
                   backgroundColor: '#fff',
-                  cursor: (orderData?.status_user_order === 1 || (orderData?.status_order === 2 && orderData?.status_delivery === 2)) ? 'not-allowed' : 'pointer',
-                  opacity: (orderData?.status_user_order === 1 || (orderData?.status_order === 2 && orderData?.status_delivery === 2)) ? 0.6 : 1,
+                  cursor: (!nextAvailableStatus || orderData?.status_user_order === 1) ? 'not-allowed' : 'pointer',
+                  opacity: (!nextAvailableStatus || orderData?.status_user_order === 1) ? 0.6 : 1,
                   transition: 'all 0.3s ease'
                 }}
                 onFocus={(e) => {
-                  if (orderData?.status_user_order !== 1 && !(orderData?.status_order === 2 && orderData?.status_delivery === 2)) {
+                  if (nextAvailableStatus && orderData?.status_user_order !== 1) {
                     e.target.style.borderColor = '#1976d2'
                     e.target.style.boxShadow = '0 0 0 3px rgba(25, 118, 210, 0.1)'
                   }
@@ -744,28 +828,23 @@ const AdminOrderDetail = () => {
                   e.target.style.boxShadow = 'none'
                 }}
               >
-                <option value="0" disabled={orderData?.status_order > 0 || (orderData?.status_order === 0 && orderData?.status_delivery !== null)}>Chờ xác nhận</option>
-                <option value="1" disabled={orderData?.status_order > 1 || (orderData?.status_order === 1 && orderData?.status_delivery !== null)}>Đang xử lý</option>
-                <option value="2" disabled={orderData?.status_order > 2 || (orderData?.status_order === 2 && orderData?.status_delivery !== null)}>Đã giao cho bên vận chuyển</option>
-                {orderData?.status_order === 2 && (
-                  <>
-                    <option value="3" disabled={orderData?.status_delivery !== null && orderData?.status_delivery !== undefined && orderData?.status_delivery > 0}>Đã nhận hàng từ kho</option>
-                    <option value="4" disabled={orderData?.status_delivery !== null && orderData?.status_delivery !== undefined && orderData?.status_delivery > 1}>Đang giao hàng</option>
-                    <option value="5" disabled={orderData?.status_delivery === 2}>Đã giao hàng</option>
-                  </>
+                {nextAvailableStatus ? (
+                  <option value={nextAvailableStatus.value}>{nextAvailableStatus.label}</option>
+                ) : (
+                  <option value={unifiedStatus.value} disabled>{unifiedStatus.label} (Đã hoàn thành)</option>
                 )}
               </select>
             </div>
             <button
               onClick={handleUpdateStatus}
-              disabled={updating || orderData?.status_user_order === 1 || (orderData?.status_order === 2 && orderData?.status_delivery === 2)}
+              disabled={updating || !nextAvailableStatus || orderData?.status_user_order === 1}
               style={{
                 padding: '12px 24px',
                 backgroundColor: '#1976d2',
                 color: 'white',
                 border: 'none',
                 borderRadius: '10px',
-                cursor: (updating || orderData?.status_user_order === 1 || (orderData?.status_order === 2 && orderData?.status_delivery === 2)) ? 'not-allowed' : 'pointer',
+                cursor: (updating || !nextAvailableStatus || orderData?.status_user_order === 1) ? 'not-allowed' : 'pointer',
                 fontSize: '1.4rem',
                 fontWeight: '600',
                 opacity: (updating || orderData?.status_user_order === 1 || (orderData?.status_order === 2 && orderData?.status_delivery === 2)) ? 0.6 : 1,

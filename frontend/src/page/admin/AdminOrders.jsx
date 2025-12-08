@@ -96,6 +96,17 @@ const AdminOrders = () => {
   // Sử dụng formatDateOnly từ dateHelper (chỉ hiển thị ngày, không có giờ)
   const formatDate = formatDateOnly
 
+  // Hàm lấy phương thức thanh toán
+  const getPaymentMethod = (methodPay) => {
+    // method_pay: 0 = cash, 1 = bank, 2 = MoMo
+    const methodMap = {
+      0: 'Thanh toán khi nhận hàng',
+      1: 'Thanh toán qua ngân hàng',
+      2: 'Thanh toán qua MoMo',
+    }
+    return methodMap[methodPay] || 'Không xác định'
+  }
+
   // Đảm bảo orders luôn là mảng
   const safeOrders = useMemo(() => {
     if (!orders) return []
@@ -313,6 +324,16 @@ const AdminOrders = () => {
                   color: '#495057',
                   letterSpacing: '0.01em'
                 }}>
+                  Phương thức thanh toán
+                </th>
+                <th style={{ 
+                  padding: '18px 16px', 
+                  textAlign: 'left', 
+                  fontSize: '1.3rem', 
+                  fontWeight: '600',
+                  color: '#495057',
+                  letterSpacing: '0.01em'
+                }}>
                   Trạng thái
                 </th>
                 <th style={{ 
@@ -330,7 +351,7 @@ const AdminOrders = () => {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan="6" style={{ 
+                  <td colSpan="7" style={{ 
                     padding: '60px 40px', 
                     textAlign: 'center', 
                     fontSize: '1.5rem', 
@@ -350,7 +371,7 @@ const AdminOrders = () => {
                 </tr>
               ) : paginatedOrders.length === 0 ? (
                 <tr>
-                  <td colSpan="6" style={{ 
+                  <td colSpan="7" style={{ 
                     padding: '60px 40px', 
                     textAlign: 'center', 
                     fontSize: '1.5rem', 
@@ -363,6 +384,7 @@ const AdminOrders = () => {
               ) : (
                 paginatedOrders.map((order) => {
                   const finalStatus = getFinalStatus(order)
+                  const paymentMethod = getPaymentMethod(order.method_pay)
                   return (
                     <tr
                       key={order.id}
@@ -418,6 +440,13 @@ const AdminOrders = () => {
                         color: '#1976d2'
                       }}>
                         {formatCurrency(order.total_order)}
+                      </td>
+                      <td style={{ 
+                        padding: '16px', 
+                        fontSize: '1.4rem',
+                        color: '#495057'
+                      }}>
+                        {paymentMethod}
                       </td>
                       <td style={{ padding: '16px' }}>
                         <span style={{

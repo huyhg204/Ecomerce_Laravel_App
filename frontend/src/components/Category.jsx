@@ -110,7 +110,7 @@ const CategoryItem = ({ category, getIcon }) => {
             className="category_icon" 
             style={{
               fontSize: '2.5rem',
-              color: '#1976d2'
+              color: '#d32f2f'
             }}
           />
         )}
@@ -184,7 +184,7 @@ const Category = () => {
             padding: '40px 0',
             gap: '15px'
           }}>
-            <ClipLoader color="#1976d2" size={40} />
+            <ClipLoader color="#d32f2f" size={40} />
             <p style={{ fontSize: '1.4rem', color: '#666' }}>
               Đang tải danh mục...
             </p>

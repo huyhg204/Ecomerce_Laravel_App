@@ -176,10 +176,73 @@ const ProductsDetail = () => {
     }
   }
 
+  // Tính số lượng có sẵn (từ size nếu có, nếu không thì từ product stock)
+  const getAvailableQuantity = () => {
+    if (!product) return 0
+    
+    // Nếu có size được chọn, lấy quantity từ size đó
+    if (selectedSize && availableSizes.length > 0) {
+      const selectedSizeItem = availableSizes.find(s => s.size === selectedSize)
+      if (selectedSizeItem) {
+        return selectedSizeItem.quantity || 0
+      }
+    }
+    
+    // Nếu không có size, lấy từ product stock
+    return product.stock || 0
+  }
+
+  // Lấy số lượng đã có trong cart (cần fetch từ API)
+  const [quantityInCart, setQuantityInCart] = useState(0)
+
+  useEffect(() => {
+    const fetchCartQuantity = async () => {
+      if (!authService.isAuthenticated() || !product) return
+      
+      try {
+        const cartItems = await cartService.getCart()
+        const cartItem = cartItems.find(item => {
+          if (item.product_id === product.id) {
+            if (selectedSize) {
+              return item.size === selectedSize
+            }
+            return !item.size || item.size === null
+          }
+          return false
+        })
+        setQuantityInCart(cartItem ? cartItem.quantity_item : 0)
+      } catch (error) {
+        console.error('Lỗi khi lấy số lượng trong cart:', error)
+        setQuantityInCart(0)
+      }
+    }
+    
+    fetchCartQuantity()
+  }, [product, selectedSize])
+
   const updateQuantity = (delta) => {
+    const availableQty = getAvailableQuantity()
+    const maxQuantity = availableQty - quantityInCart // Trừ đi số lượng đã có trong cart
+    
+    // Nếu không còn hàng để thêm, không cho tăng
+    if (maxQuantity <= 0) {
+      toast.error('Đã hết hàng', {
+        description: `Bạn đã thêm tất cả ${availableQty} sản phẩm vào giỏ hàng.`
+      })
+      return
+    }
+    
     const newQuantity = quantity + delta
-    if (newQuantity >= 1) {
+    if (newQuantity >= 1 && newQuantity <= maxQuantity) {
       setQuantity(newQuantity)
+    } else if (newQuantity > maxQuantity) {
+      // Nếu cố tăng quá max, set về max
+      setQuantity(maxQuantity)
+      toast.error(`Số lượng tối đa có thể thêm là ${maxQuantity}`, {
+        description: `Hiện có ${quantityInCart} sản phẩm trong giỏ hàng. Tổng tồn kho: ${availableQty}`
+      })
+    } else if (newQuantity < 1) {
+      setQuantity(1)
     }
   }
 
@@ -188,6 +251,24 @@ const ProductsDetail = () => {
       if (window.confirm('Bạn cần đăng nhập để thêm vào giỏ hàng. Đi đến trang đăng nhập?')) {
         navigate('/login')
       }
+      return
+    }
+
+    // Kiểm tra tồn kho trước khi thêm vào cart
+    const availableQty = getAvailableQuantity()
+    const maxQuantity = availableQty - quantityInCart
+    
+    if (availableQty === 0) {
+      toast.error('Sản phẩm đã hết hàng', {
+        description: 'Vui lòng chọn sản phẩm khác hoặc quay lại sau.'
+      })
+      return
+    }
+
+    if (quantity > maxQuantity) {
+      toast.error('Số lượng vượt quá tồn kho', {
+        description: `Chỉ còn ${maxQuantity} sản phẩm có thể thêm vào giỏ hàng. (Tổng tồn kho: ${availableQty}, Đã có trong giỏ: ${quantityInCart})`
+      })
       return
     }
 
@@ -200,9 +281,25 @@ const ProductsDetail = () => {
         size: selectedSize,
         product_attribute_id: productAttributeId
       })
-      toast.success('Đã thêm vào giỏ hàng!', {
-        description: `Đã thêm ${quantity} sản phẩm vào giỏ hàng.`,
-      })
+      
+      // Cập nhật số lượng trong cart sau khi thêm thành công
+      const newQuantityInCart = quantityInCart + quantity
+      setQuantityInCart(newQuantityInCart)
+      
+      // Reset quantity về 1 sau khi thêm vào cart
+      setQuantity(1)
+      
+      // Kiểm tra nếu đã hết hàng sau khi thêm vào cart
+      const remainingQty = availableQty - newQuantityInCart
+      if (remainingQty <= 0) {
+        toast.success('Đã thêm vào giỏ hàng!', {
+          description: `Đã thêm ${quantity} sản phẩm vào giỏ hàng. Sản phẩm đã hết hàng.`,
+        })
+      } else {
+        toast.success('Đã thêm vào giỏ hàng!', {
+          description: `Đã thêm ${quantity} sản phẩm vào giỏ hàng. Còn lại ${remainingQty} sản phẩm.`,
+        })
+      }
     } catch (error) {
       toast.error('Không thể thêm vào giỏ hàng', {
         description: error.message || 'Vui lòng thử lại sau.',
@@ -431,7 +528,13 @@ const ProductsDetail = () => {
                       <button
                         key={sizeItem.size}
                         className={`product_size_btn ${selectedSize === sizeItem.size ? 'active' : ''}`}
-                        onClick={() => setSelectedSize(sizeItem.size)}
+                        onClick={() => {
+                          setSelectedSize(sizeItem.size)
+                          // Reset quantity về 1 khi đổi size
+                          setQuantity(1)
+                          // Reset quantityInCart để fetch lại
+                          setQuantityInCart(0)
+                        }}
                         disabled={sizeItem.quantity === 0}
                         style={{
                           opacity: sizeItem.quantity === 0 ? 0.5 : 1,
@@ -453,6 +556,11 @@ const ProductsDetail = () => {
                     className="quantity_btn"
                     onClick={() => updateQuantity(-1)}
                     aria-label="Giảm số lượng"
+                    disabled={quantity <= 1 || getAvailableQuantity() === 0}
+                    style={{
+                      opacity: (quantity <= 1 || getAvailableQuantity() === 0) ? 0.5 : 1,
+                      cursor: (quantity <= 1 || getAvailableQuantity() === 0) ? 'not-allowed' : 'pointer'
+                    }}
                   >
                     <FaChevronDown />
                   </button>
@@ -460,19 +568,87 @@ const ProductsDetail = () => {
                     type="number"
                     className="quantity_input"
                     value={quantity}
-                    onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
+                    onChange={(e) => {
+                      const newQty = parseInt(e.target.value) || 1
+                      const availableQty = getAvailableQuantity()
+                      const maxQuantity = availableQty - quantityInCart
+                      
+                      // Nếu không còn hàng để thêm
+                      if (maxQuantity <= 0) {
+                        setQuantity(1)
+                        toast.error('Đã hết hàng', {
+                          description: `Bạn đã thêm tất cả ${availableQty} sản phẩm vào giỏ hàng.`
+                        })
+                        return
+                      }
+                      
+                      if (newQty >= 1 && newQty <= maxQuantity) {
+                        setQuantity(newQty)
+                      } else if (newQty > maxQuantity) {
+                        setQuantity(maxQuantity)
+                        toast.error(`Số lượng tối đa là ${maxQuantity}`, {
+                          description: `Tổng tồn kho: ${availableQty}, Đã có trong giỏ: ${quantityInCart}`
+                        })
+                      } else {
+                        setQuantity(1)
+                      }
+                    }}
                     min="1"
+                    max={Math.max(1, getAvailableQuantity() - quantityInCart)}
+                    disabled={getAvailableQuantity() === 0 || (getAvailableQuantity() - quantityInCart) <= 0}
+                    style={{
+                      opacity: getAvailableQuantity() === 0 ? 0.5 : 1,
+                      cursor: getAvailableQuantity() === 0 ? 'not-allowed' : 'text'
+                    }}
                   />
                   <button
                     className="quantity_btn"
                     onClick={() => updateQuantity(1)}
                     aria-label="Tăng số lượng"
+                    disabled={
+                      getAvailableQuantity() === 0 || 
+                      (getAvailableQuantity() - quantityInCart) <= 0 ||
+                      quantity >= (getAvailableQuantity() - quantityInCart)
+                    }
+                    style={{
+                      opacity: (
+                        getAvailableQuantity() === 0 || 
+                        (getAvailableQuantity() - quantityInCart) <= 0 ||
+                        quantity >= (getAvailableQuantity() - quantityInCart)
+                      ) ? 0.5 : 1,
+                      cursor: (
+                        getAvailableQuantity() === 0 || 
+                        (getAvailableQuantity() - quantityInCart) <= 0 ||
+                        quantity >= (getAvailableQuantity() - quantityInCart)
+                      ) ? 'not-allowed' : 'pointer'
+                    }}
                   >
                     <FaChevronUp />
                   </button>
                 </div>
-                <button className="product_buy_btn" onClick={handleAddToCart}>
-                  Thêm vào giỏ
+                <button 
+                  className="product_buy_btn" 
+                  onClick={handleAddToCart}
+                  disabled={
+                    getAvailableQuantity() === 0 || 
+                    (getAvailableQuantity() - quantityInCart) <= 0
+                  }
+                  style={{
+                    opacity: (
+                      getAvailableQuantity() === 0 || 
+                      (getAvailableQuantity() - quantityInCart) <= 0
+                    ) ? 0.5 : 1,
+                    cursor: (
+                      getAvailableQuantity() === 0 || 
+                      (getAvailableQuantity() - quantityInCart) <= 0
+                    ) ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  {
+                    getAvailableQuantity() === 0 || (getAvailableQuantity() - quantityInCart) <= 0
+                      ? 'Hết hàng' 
+                      : 'Thêm vào giỏ'
+                  }
                 </button>
                 <button 
                   className={`product_wishlist_btn ${isInWishlist ? 'active' : ''}`}

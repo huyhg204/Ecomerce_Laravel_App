@@ -75,6 +75,9 @@ Route::middleware(['auth:sanctum', CorsMiddleware::class])->group(function () {
     Route::post('/cart/remove', [CartController::class, 'removeFromCart']);
     Route::post('/checkout', [OrderController::class, 'createOrder']);
 
+    // MoMo Payment
+    Route::post('/momo_payment', [OrderController::class, 'momo_payment']);
+
     // ----------------------------------------------------------------------
     // USER ROUTES (Role = 0)
     // ----------------------------------------------------------------------
@@ -134,6 +137,7 @@ Route::middleware(['auth:sanctum', CorsMiddleware::class])->group(function () {
 
         // Revenue
         Route::get('/revenue', [RevenueController::class, 'index']);
+        Route::get('/revenue/last-7-days', [RevenueController::class, 'getLast7DaysStats']);
 
         // Reviews
         Route::get('/reviews', [AdminReviewController::class, 'index']);

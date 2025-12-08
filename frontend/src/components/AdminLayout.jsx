@@ -71,7 +71,6 @@ const AdminLayout = ({ children }) => {
     { path: '/admin/orders', label: 'Đơn hàng', icon: FaShoppingBag },
     { path: '/admin/reviews', label: 'Đánh giá', icon: FaStar },
     { path: '/admin/vouchers', label: 'Voucher', icon: FaTicketAlt },
-    // { path: '/admin/revenue', label: 'Doanh thu', icon: FaChartLine },
   ]
 
   const isActive = (path) => {
@@ -81,18 +80,28 @@ const AdminLayout = ({ children }) => {
     return location.pathname.startsWith(path)
   }
 
+  // --- STYLE COLORS ---
+  const brandColors = {
+    sidebarBg: '#000000',      // Đen (giống Footer/Header)
+    activeBg: '#d32f2f',       // Đỏ (giống nút bấm)
+    text: '#ffffff',           // Trắng
+    textMuted: '#b0b0b0',      // Xám nhạt cho item chưa chọn
+    hoverBg: 'rgba(255, 255, 255, 0.1)' // Màu hover nhẹ
+  }
+
   return (
     <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#f5f5f5' }}>
       {/* Sidebar */}
       <aside style={{
         width: sidebarOpen ? '250px' : '70px',
-        backgroundColor: '#1976d2',
-        color: '#fff',
+        backgroundColor: brandColors.sidebarBg, // Sửa thành màu đen
+        color: brandColors.text,
         transition: 'width 0.3s',
         position: 'fixed',
         height: '100vh',
         overflowY: 'auto',
-        zIndex: 1000
+        zIndex: 1000,
+        boxShadow: '2px 0 5px rgba(0,0,0,0.1)'
       }}>
         <div style={{
           padding: '20px',
@@ -102,8 +111,13 @@ const AdminLayout = ({ children }) => {
           alignItems: 'center'
         }}>
           {sidebarOpen && (
-            <h2 style={{ margin: 0, fontSize: '2rem', fontWeight: 'bold' }}>
-              Admin Panel
+            <h2 style={{ 
+              margin: 0, 
+              fontSize: '2rem', 
+              fontWeight: 'bold',
+              letterSpacing: '1px' // Thêm khoảng cách chữ cho giống logo
+            }}>
+              SAIGONGENZ
             </h2>
           )}
           <button
@@ -133,21 +147,26 @@ const AdminLayout = ({ children }) => {
                   display: 'flex',
                   alignItems: 'center',
                   padding: '15px 20px',
-                  color: active ? '#fff' : 'rgba(255,255,255,0.8)',
-                  backgroundColor: active ? 'rgba(255,255,255,0.1)' : 'transparent',
+                  color: active ? '#fff' : brandColors.textMuted,
+                  // Active sẽ có nền Đỏ, Inactive nền trong suốt
+                  backgroundColor: active ? brandColors.activeBg : 'transparent', 
                   textDecoration: 'none',
                   fontSize: '1.5rem',
                   transition: 'all 0.2s',
-                  borderLeft: active ? '4px solid #fff' : '4px solid transparent'
+                  // Bỏ border left hoặc để cùng màu nền để tạo khối liền mạch
+                  borderLeft: active ? `4px solid ${brandColors.activeBg}` : '4px solid transparent',
+                  fontWeight: active ? 'bold' : 'normal'
                 }}
                 onMouseEnter={(e) => {
                   if (!active) {
-                    e.target.style.backgroundColor = 'rgba(255,255,255,0.05)'
+                    e.target.style.backgroundColor = brandColors.hoverBg
+                    e.target.style.color = '#fff'
                   }
                 }}
                 onMouseLeave={(e) => {
                   if (!active) {
                     e.target.style.backgroundColor = 'transparent'
+                    e.target.style.color = brandColors.textMuted
                   }
                 }}
               >
@@ -164,12 +183,13 @@ const AdminLayout = ({ children }) => {
           bottom: 0,
           width: '100%',
           borderTop: '1px solid rgba(255,255,255,0.1)',
-          padding: '20px'
+          padding: '20px',
+          backgroundColor: '#000' // Đảm bảo nền đen che content khi scroll
         }}>
           {sidebarOpen && user && (
             <div style={{ marginBottom: '15px', fontSize: '1.3rem' }}>
               <p style={{ margin: '0 0 5px 0', fontWeight: 'bold' }}>{user.name}</p>
-              <p style={{ margin: 0, fontSize: '1.2rem', opacity: 0.8 }}>{user.email}</p>
+              <p style={{ margin: 0, fontSize: '1.2rem', opacity: 0.6 }}>{user.email}</p>
             </div>
           )}
           <button
@@ -185,10 +205,10 @@ const AdminLayout = ({ children }) => {
               color: '#fff',
               cursor: 'pointer',
               fontSize: '1.5rem',
-              borderRadius: '5px',
+              borderRadius: '4px', // Bo góc nhẹ giống nút trên web
               transition: 'background-color 0.2s'
             }}
-            onMouseEnter={(e) => e.target.style.backgroundColor = 'rgba(255,255,255,0.2)'}
+            onMouseEnter={(e) => e.target.style.backgroundColor = brandColors.activeBg} // Hover logout ra màu đỏ cảnh báo
             onMouseLeave={(e) => e.target.style.backgroundColor = 'rgba(255,255,255,0.1)'}
           >
             <FaSignOutAlt style={{ fontSize: '2rem', marginRight: sidebarOpen ? '15px' : '0' }} />
@@ -202,7 +222,8 @@ const AdminLayout = ({ children }) => {
         marginLeft: sidebarOpen ? '250px' : '70px',
         flex: 1,
         transition: 'margin-left 0.3s',
-        padding: '30px'
+        padding: '30px',
+        backgroundColor: '#f8f9fa' // Màu nền sáng nhẹ
       }}>
         {children}
       </main>
@@ -211,4 +232,3 @@ const AdminLayout = ({ children }) => {
 }
 
 export default AdminLayout
-

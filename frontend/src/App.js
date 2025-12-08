@@ -21,6 +21,12 @@ import OrderDetail from './page/OrderDetail'
 import OrderSuccess from './page/OrderSuccess'
 import WishList from './page/WishList'
 import Error from './page/Error'
+
+// --- START NEW IMPORTS ---
+import About from './page/About'     // Import trang Giới thiệu
+import Contact from './page/Contact' // Import trang Liên hệ
+// --- END NEW IMPORTS ---
+
 import AdminDashboard from './page/admin/AdminDashboard'
 import AdminProducts from './page/admin/AdminProducts'
 import AdminCategories from './page/admin/AdminCategories'
@@ -62,6 +68,11 @@ function App() {
           <Route path="/order-success" element={<><Nav /><OrderSuccess /><Footer /></>} />
           <Route path="/wishlist" element={<><Nav /><WishList /><Footer /></>} />
           
+          {/* --- START NEW ROUTES --- */}
+          <Route path="/about" element={<><Nav /><About /><Footer /></>} />
+          <Route path="/contact" element={<><Nav /><Contact /><Footer /></>} />
+          {/* --- END NEW ROUTES --- */}
+
           {/* Admin Routes */}
           <Route path="/admin" element={
             <AdminLayout>

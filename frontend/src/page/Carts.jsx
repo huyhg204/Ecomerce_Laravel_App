@@ -12,6 +12,7 @@ const Carts = () => {
   const [cartItems, setCartItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [availableQuantities, setAvailableQuantities] = useState({}) // { productId_size: availableQty }
 
   const fetchCart = async () => {
     if (!authService.isAuthenticated()) {
@@ -35,22 +36,100 @@ const Carts = () => {
     }
   }
 
-  const updateQuantity = async (productId, size, newQuantity) => {
-    if (newQuantity < 1) return
+  // Hàm lấy tồn kho của sản phẩm
+  const getAvailableQuantity = async (productId, productAttributeId, size) => {
+    try {
+      // Lấy thông tin sản phẩm
+      const productResponse = await axiosInstance.get(`/product/${productId}`)
+      if (productResponse.data.status === 'success') {
+        const productData = productResponse.data.data.product || productResponse.data.data
+        
+        // Nếu có product_attribute_id, lấy quantity từ attribute
+        if (productAttributeId) {
+          const attributes = productResponse.data.data.attributes || []
+          const attribute = attributes.find(attr => attr.id === productAttributeId)
+          if (attribute) {
+            return attribute.quantity || 0
+          }
+        }
+        
+        // Nếu không có attribute, lấy từ product
+        return productData.quantity_product || 0
+      }
+      return 0
+    } catch (error) {
+      console.error('Lỗi khi lấy tồn kho:', error)
+      return 0
+    }
+  }
+
+  // Fetch tồn kho cho tất cả sản phẩm trong cart
+  const fetchAvailableQuantities = async () => {
+    if (!cartItems || cartItems.length === 0) return
+    
+    const quantities = {}
+    for (const item of cartItems) {
+      const key = `${item.product_id}_${item.size || ''}`
+      if (!quantities[key]) {
+        const availableQty = await getAvailableQuantity(item.product_id, item.product_attribute_id, item.size)
+        quantities[key] = availableQty
+      }
+    }
+    setAvailableQuantities(quantities)
+  }
+
+  const updateQuantity = async (productId, size, newQuantity, productAttributeId) => {
+    if (newQuantity < 1) {
+      toast.error('Số lượng phải lớn hơn 0')
+      return
+    }
+    
+    // Lấy tồn kho từ state hoặc fetch mới
+    const key = `${productId}_${size || ''}`
+    let availableQty = availableQuantities[key]
+    
+    // Nếu chưa có trong state, fetch mới
+    if (availableQty === undefined) {
+      availableQty = await getAvailableQuantity(productId, productAttributeId, size)
+      setAvailableQuantities(prev => ({ ...prev, [key]: availableQty }))
+    }
+    
+    if (availableQty === 0) {
+      toast.error('Sản phẩm đã hết hàng', {
+        description: 'Không thể tăng số lượng. Sản phẩm đã hết hàng.'
+      })
+      return
+    }
+    
+    if (newQuantity > availableQty) {
+      toast.error('Số lượng vượt quá tồn kho', {
+        description: `Chỉ còn ${availableQty} sản phẩm trong kho.`
+      })
+      return
+    }
     
     try {
       const payload = {
         product_id: productId,
         quantity_item: newQuantity,
-        update_mode: true, // Báo cho backend biết là set quantity mới, không phải cộng thêm
+        update_mode: true, // Báo cho backend biết là set quantity mới
       }
       if (size) {
         payload.size = size
+      }
+      if (productAttributeId) {
+        payload.product_attribute_id = productAttributeId
       }
       
       await axiosInstance.post('/cart/add', payload)
       // Refresh cart từ API để lấy dữ liệu mới nhất
       await fetchCart()
+      // Refresh tồn kho sau khi update
+      await fetchAvailableQuantities()
+
+      // *** CẬP NHẬT BADGE TRÊN NAV ***
+      window.dispatchEvent(new Event('updateCartCount'))
+
     } catch (error) {
       toast.error('Không thể cập nhật số lượng', {
         description: error.response?.data?.message || 'Vui lòng thử lại sau.',
@@ -69,6 +148,10 @@ const Carts = () => {
       await axiosInstance.post('/cart/remove', payload)
       // Refresh cart từ API để lấy dữ liệu mới nhất
       await fetchCart()
+
+      // *** CẬP NHẬT BADGE TRÊN NAV ***
+      window.dispatchEvent(new Event('updateCartCount'))
+
     } catch (error) {
       toast.error('Không thể xóa sản phẩm', {
         description: 'Vui lòng thử lại sau.',
@@ -81,6 +164,14 @@ const Carts = () => {
     fetchCart()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Fetch tồn kho khi cartItems thay đổi
+  useEffect(() => {
+    if (cartItems && cartItems.length > 0) {
+      fetchAvailableQuantities()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cartItems])
 
   // Tính tổng giá giảm (tạm tính)
   const subtotal = cartItems.reduce((sum, item) => {
@@ -213,6 +304,12 @@ const Carts = () => {
                       const originalPrice = item.original_price || item.price_product
                       const quantity = item.quantity_item
                       const size = item.size
+                      const productAttributeId = item.product_attribute_id
+                      
+                      // Lấy tồn kho từ state
+                      const key = `${productId}_${size || ''}`
+                      const availableQty = availableQuantities[key] ?? null
+                      const maxQuantity = availableQty !== null ? availableQty : Infinity
                       
                       return (
                         <div 
@@ -302,16 +399,18 @@ const Carts = () => {
                               overflow: 'hidden'
                             }}>
                               <button
-                                onClick={() => updateQuantity(productId, size, quantity - 1)}
+                                onClick={() => updateQuantity(productId, size, quantity - 1, productAttributeId)}
                                 aria-label="Giảm số lượng"
+                                disabled={quantity <= 1}
                                 style={{
                                   padding: '8px 12px',
                                   border: 'none',
                                   backgroundColor: '#f5f5f5',
-                                  cursor: 'pointer',
+                                  cursor: quantity <= 1 ? 'not-allowed' : 'pointer',
                                   fontSize: '1.2rem',
                                   display: 'flex',
-                                  alignItems: 'center'
+                                  alignItems: 'center',
+                                  opacity: quantity <= 1 ? 0.5 : 1
                                 }}
                               >
                                 <FaChevronDown />
@@ -319,30 +418,52 @@ const Carts = () => {
                               <input
                                 type="number"
                                 value={quantity}
-                                onChange={(e) =>
-                                  updateQuantity(productId, size, parseInt(e.target.value) || 1)
-                                }
+                                onChange={(e) => {
+                                  const newQty = parseInt(e.target.value) || 1
+                                  if (availableQty !== null && newQty > maxQuantity) {
+                                    toast.error(`Số lượng tối đa là ${maxQuantity}`, {
+                                      description: `Chỉ còn ${maxQuantity} sản phẩm trong kho.`
+                                    })
+                                    return
+                                  }
+                                  updateQuantity(productId, size, newQty, productAttributeId)
+                                }}
                                 min="1"
+                                max={availableQty !== null ? maxQuantity : undefined}
+                                disabled={availableQty === 0}
                                 style={{
                                   width: '50px',
                                   padding: '8px',
                                   border: 'none',
                                   textAlign: 'center',
                                   fontSize: '1.4rem',
-                                  outline: 'none'
+                                  outline: 'none',
+                                  opacity: availableQty === 0 ? 0.5 : 1,
+                                  cursor: availableQty === 0 ? 'not-allowed' : 'text'
                                 }}
                               />
                               <button
-                                onClick={() => updateQuantity(productId, size, quantity + 1)}
+                                onClick={() => updateQuantity(productId, size, quantity + 1, productAttributeId)}
                                 aria-label="Tăng số lượng"
+                                disabled={
+                                  availableQty === 0 || 
+                                  (availableQty !== null && quantity >= maxQuantity)
+                                }
                                 style={{
                                   padding: '8px 12px',
                                   border: 'none',
                                   backgroundColor: '#f5f5f5',
-                                  cursor: 'pointer',
+                                  cursor: (
+                                    availableQty === 0 || 
+                                    (availableQty !== null && quantity >= maxQuantity)
+                                  ) ? 'not-allowed' : 'pointer',
                                   fontSize: '1.2rem',
                                   display: 'flex',
-                                  alignItems: 'center'
+                                  alignItems: 'center',
+                                  opacity: (
+                                    availableQty === 0 || 
+                                    (availableQty !== null && quantity >= maxQuantity)
+                                  ) ? 0.5 : 1
                                 }}
                               >
                                 <FaChevronUp />

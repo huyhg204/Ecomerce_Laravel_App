@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ClipLoader } from 'react-spinners'
 import { formatCurrency } from '../utils/formatCurrency'
@@ -48,6 +48,7 @@ const handleApiError = (error) => {
 
 const CheckOut = () => {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [orderItems, setOrderItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
@@ -57,7 +58,7 @@ const CheckOut = () => {
     phone_customer: '',
     note: '',
   })
-  const [paymentMethod, setPaymentMethod] = useState('cash')
+  const [paymentMethod, setPaymentMethod] = useState('cash') // cash, bank, momo
   const [couponCode, setCouponCode] = useState('')
   const [voucherDiscount, setVoucherDiscount] = useState(0) // Giá giảm từ voucher
   const [voucherApplied, setVoucherApplied] = useState(false) // Trạng thái đã áp voucher
@@ -79,6 +80,15 @@ const CheckOut = () => {
         phone_customer: user.phone,
       }))
     }
+    
+    // Kiểm tra error từ query params (từ MoMo callback)
+    const errorParam = searchParams.get('error')
+    if (errorParam) {
+      setError(decodeURIComponent(errorParam))
+      // Xóa error param khỏi URL
+      navigate('/checkout', { replace: true })
+    }
+    
     fetchCart()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -181,6 +191,71 @@ const CheckOut = () => {
       }
 
       setOrderItems(currentCartItems)
+
+      // Nếu thanh toán bằng MoMo, gửi đến endpoint riêng
+      if (paymentMethod === 'momo') {
+        // Kiểm tra finalTotal có giá trị hợp lệ không
+        if (!finalTotal || finalTotal <= 0) {
+          setError('Tổng tiền không hợp lệ. Vui lòng kiểm tra lại giỏ hàng.')
+          setSubmitting(false)
+          return
+        }
+
+        const momoData = {
+          name_customer: formData.name_customer.trim(),
+          address_customer: formData.address_customer.trim(),
+          phone_customer: formData.phone_customer.trim(),
+          note_customer: formData.note ? formData.note.trim() : '',
+          total_momo: Math.round(finalTotal), // Làm tròn để đảm bảo là số nguyên
+        }
+
+        // Chỉ thêm voucher_code nếu đã áp dụng
+        if (voucherApplied && couponCode) {
+          momoData.voucher_code = couponCode
+        }
+
+        console.log('Sending MoMo payment data:', momoData)
+
+        try {
+          const momoResponse = await axiosInstance.post('/momo_payment', momoData)
+          
+          if (momoResponse.data.status === 'success' && momoResponse.data.payUrl) {
+            // Redirect đến MoMo payment gateway
+            window.location.href = momoResponse.data.payUrl
+            return
+          } else {
+            setError(momoResponse.data.message || 'Không thể tạo link thanh toán MoMo. Vui lòng thử lại.')
+            setSubmitting(false)
+            return
+          }
+        } catch (error) {
+          console.error('MoMo payment error:', error)
+          console.error('Error response:', error.response)
+          
+          let errorMessage = 'Không thể tạo link thanh toán MoMo. Vui lòng thử lại.'
+          
+          if (error.response) {
+            // Có response từ server
+            const errorData = error.response.data
+            if (errorData && errorData.message) {
+              errorMessage = errorData.message
+            } else if (errorData && errorData.error) {
+              errorMessage = errorData.error
+            } else if (error.response.status === 400) {
+              errorMessage = 'Dữ liệu không hợp lệ. Vui lòng kiểm tra lại thông tin.'
+            } else if (error.response.status === 401) {
+              errorMessage = 'Bạn cần đăng nhập để thanh toán.'
+              navigate('/login')
+            }
+          } else if (error.request) {
+            errorMessage = 'Không thể kết nối đến server. Vui lòng kiểm tra kết nối mạng.'
+          }
+          
+          setError(errorMessage)
+          setSubmitting(false)
+          return
+        }
+      }
 
       // Chuẩn bị dữ liệu gửi API theo format mới
       const checkoutData = {
@@ -348,11 +423,8 @@ const CheckOut = () => {
           <div style={{ 
             display: 'grid', 
             gridTemplateColumns: '1fr 1fr', 
-            gap: '30px',
-            '@media (max-width: 768px)': {
-              gridTemplateColumns: '1fr'
-            }
-          }}>
+            gap: '30px'
+          }} className="checkout-grid">
             {/* Left Column - Billing Details */}
             <div style={{
               backgroundColor: '#fff',
@@ -695,6 +767,30 @@ const CheckOut = () => {
                   Phương thức thanh toán
                 </h4>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <label style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    gap: '10px',
+                    padding: '12px',
+                    border: '1px solid #e0e0e0',
+                    borderRadius: '5px',
+                    cursor: 'pointer',
+                    fontSize: '1.4rem',
+                    backgroundColor: paymentMethod === 'momo' ? '#f0f7ff' : 'transparent',
+                    borderColor: paymentMethod === 'momo' ? '#1976d2' : '#e0e0e0'
+                  }}>
+                    <input
+                      type="radio"
+                      name="paymentMethod"
+                      value="momo"
+                      checked={paymentMethod === 'momo'}
+                      onChange={(e) => setPaymentMethod(e.target.value)}
+                      style={{ width: '18px', height: '18px' }}
+                    />
+                    <span style={{ fontWeight: paymentMethod === 'momo' ? 'bold' : 'normal' }}>
+                      Thanh toán qua MoMo
+                    </span>
+                  </label>
                   <label style={{ 
                     display: 'flex', 
                     alignItems: 'center', 

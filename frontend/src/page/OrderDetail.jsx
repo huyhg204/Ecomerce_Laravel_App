@@ -280,10 +280,11 @@ const OrderDetail = () => {
   }
 
   const getPaymentMethod = (methodPay) => {
-    // method_pay: 0 = cash, 1 = bank
+    // method_pay: 0 = cash, 1 = bank, 2 = MoMo
     const methodMap = {
       0: 'Thanh toán khi nhận hàng',
       1: 'Thanh toán qua ngân hàng',
+      2: 'Thanh toán qua MoMo',
     }
     return methodMap[methodPay] || 'Không xác định'
   }
