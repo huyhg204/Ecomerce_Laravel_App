@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Mail;
 use Carbon\Carbon;
+use Illuminate\Support\Str;
 
 class OrderController extends Controller
 {
@@ -1241,22 +1242,12 @@ class OrderController extends Controller
             return back()->with('error', 'Tổng tiền không khớp. Vui lòng làm mới trang và thử lại.');
         }
 
-        // Tạo đơn hàng tạm thời với status_order = 0 (chờ thanh toán)
-        // Các biến $nameCustomer, $phoneCustomer, $addressCustomer, $noteCustomer đã lấy từ request ở trên
         try {
-            DB::beginTransaction();
-
-            // Check tồn kho
-            foreach ($cart as $item) {
-                $product = DB::table('products')->where('id', $item['product_id'])->lockForUpdate()->first();
-                if (!$product || $product->quantity_product < $item['quantity_item']) {
-                    throw new \Exception('Sản phẩm ' . ($product->name_product ?? 'ID '.$item['product_id']) . ' không đủ hàng.');
-                }
-            }
-
-            $orderId = DB::table('orders')->insertGetId([
+            // Chuẩn bị dữ liệu tạm cho phiên thanh toán, chưa ghi order vào DB
+            $pendingToken = Str::uuid()->toString();
+            $pendingData = [
                 'user_id'          => $userId,
-                'method_pay'       => 2, // 2 = MoMo payment
+                'method_pay'       => 2,
                 'subtotal_order'   => $subtotalOrder,
                 'voucher_id'       => $voucherId,
                 'voucher_code'     => $voucherCode,
@@ -1266,31 +1257,23 @@ class OrderController extends Controller
                 'address_customer' => $addressCustomer,
                 'name_customer'    => $nameCustomer,
                 'note_customer'    => $noteCustomer,
-                'status_order'     => 0, // Chờ thanh toán
-                'status_delivery'  => null,
-                'status_user_order' => null,
-                'reason_user_order' => null,
-                'date_order'       => now()
-            ]);
+                'cart'             => $cart,
+                'created_at'       => now(),
+            ];
+            // Lưu cache 30 phút để callback có thể đọc được cả khi không có session
+            Cache::put('momo_pending_' . $pendingToken, $pendingData, now()->addMinutes(30));
 
-            // Lưu order_details
-            foreach ($cart as $item) {
-                DB::table('order_details')->insert([
-                    'order_id'    => $orderId,
-                    'product_id'  => $item['product_id'],
-                    'product_attribute_id' => $item['product_attribute_id'] ?? null,
-                    'size' => $item['size'] ?? null,
-                    'quantity_detail' => $item['quantity_item'],
-                    'total_detail' => $item['total_item'],
-                ]);
-            }
+            // Lưu session phục vụ redirect của user
+            session()->put('momo_cart', $cart);
+            session()->put('momo_pending_token', $pendingToken);
+            session()->put('momo_pending_order', $pendingData);
 
-            // Cấu hình MoMo (trước khi commit để nếu lỗi thì rollback)
+            // Cấu hình MoMo
             $endpoint = "https://test-payment.momo.vn/v2/gateway/api/create";
             $partnerCode = 'MOMOBKUN20180529';
             $accessKey = 'klm05TvNBzhg7h7j';
             $secretKey = 'at67qH6mk8w5Y1nAyMoYKMWACiEi2bsa';
-            $orderInfo = "Thanh toán đơn hàng #MDH_" . $orderId;
+            $orderInfo = "Thanh toán đơn hàng MoMo";
             $amount = (int) $totalOrder; // MoMo yêu cầu số nguyên
             $orderIdMomo = time() . ""; // Order ID cho MoMo
             
@@ -1303,6 +1286,7 @@ class OrderController extends Controller
             
             $redirectUrl = rtrim($momoCallbackUrl, '/') . "/momo-callback";
             $ipnUrl = rtrim($momoCallbackUrl, '/') . "/momo-callback";
+            session()->put('momo_callback_url', $momoCallbackUrl);
             
             \Log::info('MoMo Payment URLs', [
                 'momo_callback_url_env' => env('MOMO_CALLBACK_URL'),
@@ -1310,7 +1294,7 @@ class OrderController extends Controller
                 'redirect_url' => $redirectUrl,
                 'ipn_url' => $ipnUrl
             ]);
-            $extraData = base64_encode(json_encode(['order_id' => $orderId]));
+            $extraData = base64_encode(json_encode(['pending_token' => $pendingToken]));
             $requestId = time() . "";
             $requestType = "payWithATM";
 
@@ -1334,8 +1318,9 @@ class OrderController extends Controller
                 'signature' => $signature
             );
 
-            // Lưu orderIdMomo vào session để verify sau
+            // Lưu thông tin bổ sung để verify sau
             session()->put('momo_order_id_momo', $orderIdMomo);
+            session()->put('momo_order_info', $orderInfo);
 
             \Log::info('Calling MoMo API', [
                 'endpoint' => $endpoint,
@@ -1368,9 +1353,6 @@ class OrderController extends Controller
                 ]);
 
                 if (isset($jsonResult['payUrl'])) {
-                    // Commit transaction sau khi MoMo API thành công
-                    DB::commit();
-                    
                     if ($request->expectsJson()) {
                         return response()->json([
                             'status' => 'success',
@@ -1382,7 +1364,6 @@ class OrderController extends Controller
                     \Log::error('MoMo API không trả về payUrl', [
                         'json_result' => $jsonResult
                     ]);
-                    DB::rollBack();
                     $errorMessage = $jsonResult['message'] ?? 'Không thể tạo link thanh toán MoMo. Vui lòng thử lại.';
                     if ($request->expectsJson()) {
                         return response()->json([
@@ -1398,7 +1379,6 @@ class OrderController extends Controller
                     'error' => $apiError->getMessage(),
                     'trace' => $apiError->getTraceAsString()
                 ]);
-                DB::rollBack();
                 if ($request->expectsJson()) {
                     return response()->json([
                         'status' => 'error',
@@ -1409,7 +1389,6 @@ class OrderController extends Controller
             }
 
         } catch (\Exception $e) {
-            DB::rollBack();
             \Log::error('MoMo Payment Error', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
@@ -1568,7 +1547,7 @@ class OrderController extends Controller
                     'result_code' => $resultCode
                 ]);
                 $frontendUrl = env('FRONTEND_URL', 'http://localhost:3000');
-                return redirect($frontendUrl . '/checkout?error=' . urlencode('Xác thực thanh toán thất bại.'));
+                return redirect($frontendUrl . '/checkout?error=' . urlencode('Thanh toán thất bại.'));
             }
             
             // Nếu resultCode = 0 (thành công) nhưng signature không khớp, log warning nhưng vẫn xử lý
@@ -1582,129 +1561,180 @@ class OrderController extends Controller
 
             // Lấy order_id từ extraData
             $extraDataDecoded = json_decode(base64_decode($extraData), true);
-            $orderId = $extraDataDecoded['order_id'] ?? session('momo_order_id');
+            $pendingToken = $extraDataDecoded['pending_token'] ?? session('momo_pending_token');
 
-            if (!$orderId) {
+            if (!$pendingToken) {
                 $frontendUrl = env('FRONTEND_URL', 'http://localhost:3000');
-                return redirect($frontendUrl . '/checkout?error=' . urlencode('Không tìm thấy thông tin đơn hàng.'));
+                return redirect($frontendUrl . '/checkout?error=' . urlencode('Không tìm thấy thông tin phiên thanh toán.'));
             }
 
-            $order = DB::table('orders')->where('id', $orderId)->first();
-            if (!$order) {
+            $pendingData = Cache::get('momo_pending_' . $pendingToken, []);
+            if (empty($pendingData)) {
+                $pendingData = session('momo_pending_order', []);
+            }
+
+            if (empty($pendingData)) {
                 $frontendUrl = env('FRONTEND_URL', 'http://localhost:3000');
-                return redirect($frontendUrl . '/checkout?error=' . urlencode('Không tìm thấy đơn hàng.'));
+                return redirect($frontendUrl . '/checkout?error=' . urlencode('Phiên thanh toán đã hết hạn hoặc không hợp lệ.'));
+            }
+
+            // Nếu user hủy (resultCode != 0): không ghi nhận order, chỉ redirect lỗi
+            if ($resultCode != 0) {
+                Cache::forget('momo_pending_' . $pendingToken);
+                session()->forget('momo_cart');
+                session()->forget('momo_pending_token');
+                session()->forget('momo_pending_order');
+                session()->forget('momo_order_id_momo');
+                $frontendUrl = env('FRONTEND_URL', 'http://localhost:3000');
+                return redirect($frontendUrl . '/checkout?error=' . urlencode('Thanh toán thất bại: ' . $message));
+            }
+
+            // Thanh toán thành công -> tạo order lúc này
+            $cart = $pendingData['cart'] ?? [];
+            if (empty($cart)) {
+                $frontendUrl = env('FRONTEND_URL', 'http://localhost:3000');
+                return redirect($frontendUrl . '/checkout?error=' . urlencode('Không tìm thấy giỏ hàng để tạo đơn.'));
+            }
+
+            // Re-calc subtotal & total để tránh bị chỉnh sửa
+            $recalcSubtotal = array_sum(array_column($cart, 'total_item'));
+            $recalcTotal = $recalcSubtotal - ($pendingData['voucher_discount'] ?? 0);
+            if ((int)$amount !== (int)$recalcTotal) {
+                \Log::warning('MoMo amount mismatch', [
+                    'callback_amount' => $amount,
+                    'recalc_total' => $recalcTotal
+                ]);
+                $frontendUrl = env('FRONTEND_URL', 'http://localhost:3000');
+                return redirect($frontendUrl . '/checkout?error=' . urlencode('Số tiền thanh toán không khớp. Vui lòng thử lại.'));
             }
 
             DB::beginTransaction();
 
-            if ($resultCode == 0) {
-                // Thanh toán thành công
-                $cart = session('momo_cart', []);
-                
-                // Giảm số lượng sản phẩm
-                foreach ($cart as $item) {
-                    DB::table('products')->where('id', $item['product_id'])->decrement('quantity_product', $item['quantity_item']);
-                    
-                    if (!empty($item['product_attribute_id'])) {
-                        DB::table('product_attributes')
-                            ->where('id', $item['product_attribute_id'])
-                            ->decrement('quantity', $item['quantity_item']);
-                    }
+            // Check tồn kho trước khi ghi đơn
+            foreach ($cart as $item) {
+                $product = DB::table('products')->where('id', $item['product_id'])->lockForUpdate()->first();
+                if (!$product || $product->quantity_product < $item['quantity_item']) {
+                    DB::rollBack();
+                    $frontendUrl = env('FRONTEND_URL', 'http://localhost:3000');
+                    return redirect($frontendUrl . '/checkout?error=' . urlencode('Sản phẩm ' . ($product->name_product ?? 'ID '.$item['product_id']) . ' không đủ hàng.'));
                 }
+            }
 
-                // Xóa cart
-                $userId = Auth::id();
-                if ($userId && !empty($cart)) {
-                    $productIdsInOrder = array_column($cart, 'product_id');
-                    DB::table('carts')->where('user_id', $userId)
-                        ->whereIn('product_id', $productIdsInOrder)
-                        ->delete();
-                }
-                session()->forget('cart');
-                session()->forget('momo_cart');
+            $orderId = DB::table('orders')->insertGetId([
+                'user_id'          => $pendingData['user_id'],
+                'method_pay'       => 2, // MoMo
+                'subtotal_order'   => $recalcSubtotal,
+                'voucher_id'       => $pendingData['voucher_id'],
+                'voucher_code'     => $pendingData['voucher_code'],
+                'voucher_discount' => $pendingData['voucher_discount'],
+                'total_order'      => $recalcTotal,
+                'phone_customer'   => $pendingData['phone_customer'],
+                'address_customer' => $pendingData['address_customer'],
+                'name_customer'    => $pendingData['name_customer'],
+                'note_customer'    => $pendingData['note_customer'],
+                'status_order'     => 1, // Đang xử lý (đã thanh toán)
+                'status_delivery'  => null,
+                'status_user_order' => null,
+                'reason_user_order' => null,
+                'date_order'       => now()
+            ]);
 
-                // Cập nhật trạng thái đơn hàng
-                DB::table('orders')->where('id', $orderId)->update([
-                    'status_order' => 1, // Đang xử lý
+            foreach ($cart as $item) {
+                DB::table('order_details')->insert([
+                    'order_id'    => $orderId,
+                    'product_id'  => $item['product_id'],
+                    'product_attribute_id' => $item['product_attribute_id'] ?? null,
+                    'size' => $item['size'] ?? null,
+                    'quantity_detail' => $item['quantity_item'],
+                    'total_detail' => $item['total_item'],
                 ]);
 
-                // Cập nhật số lần sử dụng voucher
-                if ($order->voucher_id) {
-                    DB::table('vouchers')
-                        ->where('id', $order->voucher_id)
-                        ->increment('used_count');
+                // Giảm tồn kho
+                DB::table('products')->where('id', $item['product_id'])->decrement('quantity_product', $item['quantity_item']);
+                if (!empty($item['product_attribute_id'])) {
+                    DB::table('product_attributes')
+                        ->where('id', $item['product_attribute_id'])
+                        ->decrement('quantity', $item['quantity_item']);
                 }
-
-                // Clear cache
-                Cache::forget('top_selling_products');
-                $this->clearDashboardCache();
-
-                // Gửi email xác nhận đơn hàng
-                try {
-                    $user = DB::table('users')->where('id', $order->user_id)->first();
-                    if ($user && $user->email) {
-                        $orderDetails = DB::table('order_details')
-                            ->join('products', 'order_details.product_id', '=', 'products.id')
-                            ->where('order_details.order_id', $orderId)
-                            ->select(
-                                'products.name_product',
-                                'products.image_product',
-                                'order_details.quantity_detail',
-                                'order_details.total_detail',
-                                'order_details.size'
-                            )
-                            ->get();
-                        
-                        $appUrl = config('app.url');
-                        $orderDetailsWithUrl = $orderDetails->map(function($item) use ($appUrl) {
-                            $item->image_url = $item->image_product ? $appUrl . '/' . $item->image_product : null;
-                            return $item;
-                        });
-                        
-                        $orderData = [
-                            'order_code' => 'MDH_'.$orderId,
-                            'order_id' => $orderId,
-                            'name_customer' => $order->name_customer,
-                            'phone_customer' => $order->phone_customer,
-                            'address_customer' => $order->address_customer,
-                            'date_order' => now()->format('d/m/Y H:i'),
-                            'subtotal_order' => number_format($order->subtotal_order, 0, ',', '.') . '₫',
-                            'voucher_discount' => $order->voucher_discount > 0 ? number_format($order->voucher_discount, 0, ',', '.') . '₫' : '0₫',
-                            'total_order' => number_format($order->total_order, 0, ',', '.') . '₫',
-                            'method_pay' => 'Thanh toán qua MoMo',
-                            'products' => $orderDetailsWithUrl,
-                            'app_url' => $appUrl
-                        ];
-                        
-                        Mail::send('emails.order-confirmation', ['order' => $orderData], function ($message) use ($user, $orderData) {
-                            $message->to($user->email, $user->name ?? $orderData['name_customer'])
-                                    ->subject('Xác nhận đơn hàng #' . $orderData['order_code']);
-                        });
-                    }
-                } catch (\Exception $emailError) {
-                    \Log::error('Lỗi gửi email xác nhận đơn hàng: ' . $emailError->getMessage());
-                }
-
-                DB::commit();
-                session()->forget('momo_order_id');
-                session()->forget('momo_order_id_momo');
-
-                // Redirect đến frontend order-success page
-                $frontendUrl = env('FRONTEND_URL', 'http://localhost:3000');
-                return redirect($frontendUrl . '/order-success?code=MDH_' . $orderId . '&id=' . $orderId);
-            } else {
-                // Thanh toán thất bại - xóa đơn hàng tạm
-                DB::table('orders')->where('id', $orderId)->delete();
-                DB::table('order_details')->where('order_id', $orderId)->delete();
-                DB::commit();
-                session()->forget('momo_order_id');
-                session()->forget('momo_order_id_momo');
-                session()->forget('momo_cart');
-
-                // Redirect đến frontend checkout page với error
-                $frontendUrl = env('FRONTEND_URL', 'http://localhost:3000');
-                return redirect($frontendUrl . '/checkout?error=' . urlencode('Thanh toán thất bại: ' . $message));
             }
+
+            // Xóa cart sau khi tạo đơn
+            $userId = $pendingData['user_id'];
+            if ($userId && !empty($cart)) {
+                $productIdsInOrder = array_column($cart, 'product_id');
+                DB::table('carts')->where('user_id', $userId)
+                    ->whereIn('product_id', $productIdsInOrder)
+                    ->delete();
+            }
+            session()->forget('cart');
+            session()->forget('momo_cart');
+
+            // Cập nhật số lần sử dụng voucher
+            if (!empty($pendingData['voucher_id'])) {
+                DB::table('vouchers')
+                    ->where('id', $pendingData['voucher_id'])
+                    ->increment('used_count');
+            }
+
+            // Clear cache
+            Cache::forget('top_selling_products');
+            $this->clearDashboardCache();
+
+            // Gửi email xác nhận đơn hàng
+            try {
+                $user = DB::table('users')->where('id', $pendingData['user_id'])->first();
+                if ($user && $user->email) {
+                    $orderDetails = DB::table('order_details')
+                        ->join('products', 'order_details.product_id', '=', 'products.id')
+                        ->where('order_details.order_id', $orderId)
+                        ->select(
+                            'products.name_product',
+                            'products.image_product',
+                            'order_details.quantity_detail',
+                            'order_details.total_detail',
+                            'order_details.size'
+                        )
+                        ->get();
+                    
+                    $appUrl = config('app.url');
+                    $orderDetailsWithUrl = $orderDetails->map(function($item) use ($appUrl) {
+                        $item->image_url = $item->image_product ? $appUrl . '/' . $item->image_product : null;
+                        return $item;
+                    });
+                    
+                    $orderData = [
+                        'order_code' => 'MDH_'.$orderId,
+                        'order_id' => $orderId,
+                        'name_customer' => $pendingData['name_customer'],
+                        'phone_customer' => $pendingData['phone_customer'],
+                        'address_customer' => $pendingData['address_customer'],
+                        'date_order' => now()->format('d/m/Y H:i'),
+                        'subtotal_order' => number_format($recalcSubtotal, 0, ',', '.') . '₫',
+                        'voucher_discount' => ($pendingData['voucher_discount'] ?? 0) > 0 ? number_format($pendingData['voucher_discount'], 0, ',', '.') . '₫' : '0₫',
+                        'total_order' => number_format($recalcTotal, 0, ',', '.') . '₫',
+                        'method_pay' => 'Thanh toán qua MoMo',
+                        'products' => $orderDetailsWithUrl,
+                        'app_url' => $appUrl
+                    ];
+                    
+                    Mail::send('emails.order-confirmation', ['order' => $orderData], function ($message) use ($user, $orderData) {
+                        $message->to($user->email, $user->name ?? $orderData['name_customer'])
+                                ->subject('Xác nhận đơn hàng #' . $orderData['order_code']);
+                    });
+                }
+            } catch (\Exception $emailError) {
+                \Log::error('Lỗi gửi email xác nhận đơn hàng: ' . $emailError->getMessage());
+            }
+
+            DB::commit();
+            Cache::forget('momo_pending_' . $pendingToken);
+            session()->forget('momo_pending_token');
+            session()->forget('momo_pending_order');
+            session()->forget('momo_order_id_momo');
+
+            // Redirect đến frontend order-success page
+            $frontendUrl = env('FRONTEND_URL', 'http://localhost:3000');
+            return redirect($frontendUrl . '/order-success?code=MDH_' . $orderId . '&id=' . $orderId);
 
         } catch (\Exception $e) {
             DB::rollBack();
