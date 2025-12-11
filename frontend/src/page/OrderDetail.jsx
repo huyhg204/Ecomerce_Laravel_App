@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { Link, useNavigate, useParams, useLocation } from 'react-router-dom'
 import { ClipLoader } from 'react-spinners'
+import { FaStar } from 'react-icons/fa'
 import { toast } from 'sonner'
 import { formatCurrency } from '../utils/formatCurrency'
 import { axiosInstance } from '../utils/axiosConfig'
@@ -17,6 +18,15 @@ const OrderDetail = () => {
   const [updating, setUpdating] = useState(false)
   const [showCancelModal, setShowCancelModal] = useState(false)
   const [cancelReason, setCancelReason] = useState('')
+  const [reviewForms, setReviewForms] = useState({})
+  const [submittingReview, setSubmittingReview] = useState({})
+  const [reviewsByProduct, setReviewsByProduct] = useState({})
+  const [submittedReview, setSubmittedReview] = useState({})
+  const [editReviewId, setEditReviewId] = useState(null)
+  const [editForms, setEditForms] = useState({})
+  const [savingEdit, setSavingEdit] = useState(false)
+  const currentUser = authService.getUser()
+  const buildReviewKey = (orderId, productId) => `reviewed_${orderId}_${productId}`
 
   useEffect(() => {
     if (!authService.isAuthenticated()) {
@@ -36,6 +46,21 @@ const OrderDetail = () => {
       const response = await axiosInstance.get(`/user/orders/${id}`)
       if (response.data.status === 'success') {
         setOrder(response.data.data)
+        const products = response.data.data?.products || []
+        fetchReviewsForProducts(products)
+        // Load trạng thái đã đánh giá theo từng đơn + sản phẩm từ localStorage
+        if (products.length > 0) {
+          const flags = {}
+          products.forEach((p) => {
+            const key = buildReviewKey(id, p.product_id)
+            if (localStorage.getItem(key)) {
+              flags[p.product_id] = true
+            }
+          })
+          if (Object.keys(flags).length > 0) {
+            setSubmittedReview(flags)
+          }
+        }
       } else {
         setError('Không tìm thấy đơn hàng')
       }
@@ -54,6 +79,140 @@ const OrderDetail = () => {
       }
     } finally {
       setLoading(false)
+    }
+  }
+
+  const fetchReviewsForProducts = async (products) => {
+    if (!products || products.length === 0) return
+    try {
+      const reviewPromises = products.map((p) =>
+        axiosInstance.get(`/product/${p.product_id}/reviews`, {
+          params: { order_id: id }
+        }).catch(() => null)
+      )
+      const results = await Promise.all(reviewPromises)
+      const map = {}
+      products.forEach((p, idx) => {
+        const res = results[idx]
+        const reviews = res?.data?.data?.reviews || []
+        // Chỉ hiển thị lịch sử của chính user hiện tại trong trang đơn hàng
+        const filtered = currentUser ? reviews.filter((r) => r.user_id === currentUser.id) : []
+        map[p.product_id] = filtered
+      })
+      setReviewsByProduct(map)
+    } catch (error) {
+      // Không chặn màn hình nếu lỗi
+    }
+  }
+
+  const handleReviewChange = (productId, field, value) => {
+    setReviewForms((prev) => ({
+      ...prev,
+      [productId]: {
+        rating: prev[productId]?.rating ?? 5,
+        content: prev[productId]?.content ?? '',
+        [field]: value,
+      },
+    }))
+  }
+
+  const handleSubmitReview = async (productId) => {
+    const formData = reviewForms[productId] || { rating: 5, content: '' }
+    if (!formData.content.trim()) {
+      toast.error('Vui lòng nhập nội dung đánh giá')
+      return
+    }
+
+    // Chỉ cho phép đánh giá khi đơn đã giao và chưa bị hủy
+    if (!orderData || orderData.status_delivery !== 2 || orderData.status_user_order !== 0) {
+      toast.error('Chỉ được đánh giá sau khi bạn đã xác nhận Đã nhận hàng.')
+      return
+    }
+
+    try {
+      setSubmittingReview((prev) => ({ ...prev, [productId]: true }))
+      const response = await axiosInstance.post('/user/reviews', {
+        product_id: productId,
+        order_id: id,
+        rating: formData.rating || 5,
+        content: formData.content.trim(),
+      })
+
+      if (response.data.status === 'success') {
+        toast.success('Đã gửi đánh giá, cảm ơn bạn!')
+        setReviewForms((prev) => ({
+          ...prev,
+          [productId]: { rating: 5, content: '' },
+        }))
+        setSubmittedReview((prev) => ({ ...prev, [productId]: true }))
+        // Lưu dấu đã đánh giá theo đơn hàng + sản phẩm để không hiện lại sau reload
+        localStorage.setItem(buildReviewKey(id, productId), '1')
+        setReviewsByProduct((prev) => {
+          const existing = prev[productId] || []
+          const newItem = {
+            id: response.data.data?.id || `temp-${Date.now()}`,
+            user_name: 'Bạn',
+            user_id: currentUser?.id,
+            rating: formData.rating || 5,
+            content: formData.content.trim(),
+            created_at: new Date().toISOString(),
+            order_id: id,
+          }
+          return { ...prev, [productId]: [newItem, ...existing] }
+        })
+      }
+    } catch (error) {
+      toast.error('Không thể gửi đánh giá', {
+        description: error.response?.data?.message || 'Vui lòng thử lại sau.',
+      })
+    } finally {
+      setSubmittingReview((prev) => ({ ...prev, [productId]: false }))
+    }
+  }
+
+  const handleStartEdit = (review, productId) => {
+    setEditReviewId(review.id)
+    setEditForms({
+      rating: review.rating,
+      content: review.content || '',
+      productId,
+    })
+  }
+
+  const handleEditChange = (field, value) => {
+    setEditForms((prev) => ({ ...prev, [field]: value }))
+  }
+
+  const handleSaveEdit = async () => {
+    if (!editReviewId || !editForms.content?.trim()) {
+      toast.error('Vui lòng nhập nội dung đánh giá')
+      return
+    }
+    const productId = editForms.productId
+    try {
+      setSavingEdit(true)
+      const response = await axiosInstance.put(`/user/reviews/${editReviewId}`, {
+        rating: editForms.rating || 5,
+        content: editForms.content.trim(),
+      })
+      if (response.data.status === 'success') {
+        toast.success('Đã cập nhật đánh giá')
+        setReviewsByProduct((prev) => {
+          const list = prev[productId] || []
+          const updated = list.map((r) =>
+            r.id === editReviewId ? { ...r, rating: editForms.rating || 5, content: editForms.content.trim() } : r
+          )
+          return { ...prev, [productId]: updated }
+        })
+        setEditReviewId(null)
+        setEditForms({})
+      }
+    } catch (error) {
+      toast.error('Không thể cập nhật đánh giá', {
+        description: error.response?.data?.message || 'Vui lòng thử lại sau.',
+      })
+    } finally {
+      setSavingEdit(false)
     }
   }
 
@@ -296,6 +455,8 @@ const OrderDetail = () => {
   const orderProducts = order ? (order.products || []) : []
   const finalStatus = orderData ? getFinalStatus(orderData) : null
   const paymentMethod = orderData ? getPaymentMethod(orderData.method_pay) : null
+  // Chỉ cho phép đánh giá khi user đã bấm xác nhận nhận hàng (status_user_order = 0)
+  const canReviewOrder = orderData && orderData.status_delivery === 2 && orderData.status_user_order === 0
 
   // Kiểm tra điều kiện để hiển thị nút xác nhận đơn
   // Điều kiện: status_delivery = 2 (đã giao hàng) — bắt buộc và status_user_order != 1 (chưa hủy) và status_user_order != 0 (chưa xác nhận)
@@ -727,6 +888,259 @@ const OrderDetail = () => {
                   </div>
                 </div>
               </div>
+
+              {canReviewOrder && orderProducts.length > 0 && (
+                <div style={{ 
+                  marginBottom: '30px',
+                  padding: '20px',
+                  backgroundColor: '#f9f9f9',
+                  borderRadius: '8px',
+                  border: '1px solid #e0e0e0'
+                }}>
+                  <h3 style={{ fontSize: '1.8rem', marginBottom: '10px', fontWeight: 'bold' }}>
+                    Đánh giá sản phẩm đã nhận
+                  </h3>
+                  <p style={{ fontSize: '1.3rem', color: '#666', marginBottom: '20px' }}>
+                    Chỉ những đơn đã giao hàng mới có thể gửi đánh giá. Đánh giá sẽ hiển thị tại trang chi tiết sản phẩm.
+                  </p>
+
+                  <div style={{ display: 'grid', gap: '16px' }}>
+                    {orderProducts.map((product) => {
+                      const productId = product.product_id
+                      const formState = reviewForms[productId] || { rating: 5, content: '' }
+                      const history = reviewsByProduct[productId] || []
+                      const hideForm = submittedReview[productId]
+
+                      return (
+                        <div 
+                          key={productId}
+                          style={{
+                            backgroundColor: 'white',
+                            borderRadius: '8px',
+                            border: '1px solid #e5e7eb',
+                            padding: '16px',
+                            boxShadow: '0 1px 2px rgba(0,0,0,0.04)'
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
+                            {product.image_product ? (
+                              <img 
+                                src={product.image_product.startsWith('http') ? product.image_product : `/${product.image_product}`} 
+                                alt={product.name_product} 
+                                style={{ width: 50, height: 50, objectFit: 'cover', borderRadius: 6 }}
+                              />
+                            ) : (
+                              <div style={{ width: 50, height: 50, background: '#f0f0f0', borderRadius: 6 }} />
+                            )}
+                            <div>
+                              <Link to={`/products/${productId}`} style={{ fontWeight: 600, color: '#1976d2', fontSize: '1.4rem' }}>
+                                {product.name_product || 'Sản phẩm'}
+                              </Link>
+                              <p style={{ margin: 0, color: '#666', fontSize: '1.2rem' }}>
+                                Số lượng: {product.quantity_detail || 0} {product.size ? `| Size: ${product.size}` : ''}
+                              </p>
+                            </div>
+                          </div>
+
+                          {!hideForm && (
+                            <>
+                              <div style={{ marginBottom: '12px' }}>
+                                <p style={{ marginBottom: '6px', fontWeight: 600, fontSize: '1.3rem' }}>Đánh giá:</p>
+                                <div style={{ display: 'flex', gap: '6px' }}>
+                                  {Array.from({ length: 5 }).map((_, i) => (
+                                    <button
+                                      key={i}
+                                      type="button"
+                                      onClick={() => handleReviewChange(productId, 'rating', i + 1)}
+                                      style={{
+                                        border: 'none',
+                                        background: 'transparent',
+                                        cursor: 'pointer',
+                                        color: i < formState.rating ? '#fbc02d' : '#d1d5db',
+                                        fontSize: '1.6rem'
+                                      }}
+                                    >
+                                      <FaStar />
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+
+                              <div style={{ marginBottom: '12px' }}>
+                                <p style={{ marginBottom: '6px', fontWeight: 600, fontSize: '1.3rem' }}>Nội dung đánh giá:</p>
+                                <textarea
+                                  value={formState.content}
+                                  onChange={(e) => handleReviewChange(productId, 'content', e.target.value)}
+                                  rows="3"
+                                  placeholder="Chia sẻ cảm nhận sau khi nhận hàng..."
+                                  style={{
+                                    width: '100%',
+                                    borderRadius: '6px',
+                                    border: '1px solid #d1d5db',
+                                    padding: '10px',
+                                    fontSize: '1.3rem',
+                                    resize: 'vertical'
+                                  }}
+                                />
+                              </div>
+
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <Link to={`/products/${productId}`} style={{ fontSize: '1.2rem', color: '#1976d2' }}>
+                                  Xem trang sản phẩm
+                                </Link>
+                                <button
+                                  onClick={() => handleSubmitReview(productId)}
+                                  disabled={submittingReview[productId]}
+                                  style={{
+                                    padding: '10px 18px',
+                                    backgroundColor: submittingReview[productId] ? '#90caf9' : '#1976d2',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '6px',
+                                    cursor: submittingReview[productId] ? 'not-allowed' : 'pointer',
+                                    fontWeight: 600,
+                                    minWidth: '140px'
+                                  }}
+                                >
+                                  {submittingReview[productId] ? 'Đang gửi...' : 'Gửi đánh giá'}
+                                </button>
+                              </div>
+                            </>
+                          )}
+
+                          {history.length > 0 && (
+                            <div style={{ marginTop: '14px' }}>
+                              <p style={{ fontWeight: 600, fontSize: '1.3rem', marginBottom: '8px' }}>Lịch sử đánh giá</p>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                {history.map((review) => {
+                                  const isOwner = currentUser && review.user_id === currentUser.id && (!review.order_id || review.order_id === id)
+                                  const isEditing = editReviewId === review.id
+                                  return (
+                                    <div
+                                      key={review.id}
+                                      style={{
+                                        padding: '10px 12px',
+                                        borderRadius: '6px',
+                                        border: '1px solid #e5e7eb',
+                                        backgroundColor: '#fff'
+                                      }}
+                                    >
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                                        <strong style={{ fontSize: '1.2rem' }}>{review.user_name || 'Người dùng'}</strong>
+                                        <div style={{ display: 'flex', gap: '2px' }}>
+                                          {Array.from({ length: 5 }).map((_, i) => (
+                                            <FaStar
+                                              key={i}
+                                              style={{ color: i < review.rating ? '#fbc02d' : '#d1d5db', fontSize: '1.2rem' }}
+                                            />
+                                          ))}
+                                        </div>
+                                      </div>
+
+                                      {isEditing ? (
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                          <div style={{ display: 'flex', gap: '6px' }}>
+                                            {Array.from({ length: 5 }).map((_, i) => (
+                                              <button
+                                                key={i}
+                                                type="button"
+                                                onClick={() => handleEditChange('rating', i + 1)}
+                                                style={{
+                                                  border: 'none',
+                                                  background: 'transparent',
+                                                  cursor: 'pointer',
+                                                  color: i < (editForms.rating || 0) ? '#fbc02d' : '#d1d5db',
+                                                  fontSize: '1.5rem'
+                                                }}
+                                              >
+                                                <FaStar />
+                                              </button>
+                                            ))}
+                                          </div>
+                                          <textarea
+                                            value={editForms.content || ''}
+                                            onChange={(e) => handleEditChange('content', e.target.value)}
+                                            rows="3"
+                                            style={{
+                                              width: '100%',
+                                              borderRadius: '6px',
+                                              border: '1px solid #d1d5db',
+                                              padding: '10px',
+                                              fontSize: '1.2rem',
+                                              resize: 'vertical'
+                                            }}
+                                          />
+                                          <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                                            <button
+                                              onClick={() => {
+                                                setEditReviewId(null)
+                                                setEditForms({})
+                                              }}
+                                              style={{
+                                                padding: '8px 14px',
+                                                borderRadius: '6px',
+                                                border: '1px solid #d1d5db',
+                                                background: '#fff',
+                                                cursor: 'pointer',
+                                                fontSize: '1.2rem'
+                                              }}
+                                            >
+                                              Hủy
+                                            </button>
+                                            <button
+                                              onClick={handleSaveEdit}
+                                              disabled={savingEdit}
+                                              style={{
+                                                padding: '8px 14px',
+                                                borderRadius: '6px',
+                                                border: 'none',
+                                                background: savingEdit ? '#90caf9' : '#1976d2',
+                                                color: '#fff',
+                                                cursor: savingEdit ? 'not-allowed' : 'pointer',
+                                                fontSize: '1.2rem',
+                                                fontWeight: 600
+                                              }}
+                                            >
+                                              {savingEdit ? 'Đang lưu...' : 'Lưu'}
+                                            </button>
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <>
+                                          <p style={{ margin: 0, fontSize: '1.2rem', color: '#444' }}>{review.content}</p>
+                                          {isOwner && (
+                                            <div style={{ marginTop: '8px', textAlign: 'right' }}>
+                                              <button
+                                                onClick={() => handleStartEdit(review, productId)}
+                                                style={{
+                                                  padding: '6px 10px',
+                                                  borderRadius: '6px',
+                                                  border: '1px solid #1976d2',
+                                                  background: '#e3f2fd',
+                                                  color: '#1976d2',
+                                                  cursor: 'pointer',
+                                                  fontSize: '1.1rem',
+                                                  fontWeight: 600
+                                                }}
+                                              >
+                                                Sửa
+                                              </button>
+                                            </div>
+                                          )}
+                                        </>
+                                      )}
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* Order Summary */}
               <div style={{ 

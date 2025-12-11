@@ -31,7 +31,6 @@ const ProductsDetail = () => {
   const [loading, setLoading] = useState(true)
   const [selectedImage, setSelectedImage] = useState(0)
   const [quantity, setQuantity] = useState(1)
-  const [newComment, setNewComment] = useState({ rating: 5, content: '' })
   const [productComments, setProductComments] = useState([])
   const [isInWishlist, setIsInWishlist] = useState(false)
   const [averageRating, setAverageRating] = useState(0)
@@ -336,38 +335,6 @@ const ProductsDetail = () => {
     : product && product.image 
       ? [product.image] 
       : ['https://via.placeholder.com/600']
-
-  const handleSubmitComment = async (e) => {
-    e.preventDefault()
-    
-    if (!authService.isAuthenticated()) {
-      toast.error('Vui lòng đăng nhập để đánh giá sản phẩm')
-      return
-    }
-
-    if (!newComment.content.trim()) {
-      toast.error('Vui lòng nhập nội dung đánh giá')
-      return
-    }
-
-    try {
-      const response = await axiosInstance.post('/user/reviews', {
-        product_id: id,
-        rating: newComment.rating,
-        content: newComment.content.trim()
-      })
-
-      if (response.data.status === 'success') {
-        toast.success('Đã thêm đánh giá thành công')
-        setNewComment({ rating: 5, content: '' })
-        fetchReviews() // Lấy lại danh sách đánh giá
-      }
-    } catch (error) {
-      toast.error('Không thể thêm đánh giá', {
-        description: error.response?.data?.message || 'Vui lòng thử lại sau.',
-      })
-    }
-  }
 
   return (
     <div>
@@ -695,64 +662,6 @@ const ProductsDetail = () => {
         <div className="container">
           <div className="product_comments">
             <h2 className="product_comments_title">Đánh giá sản phẩm</h2>
-
-            {/* Comment Form */}
-            {authService.isAuthenticated() ? (
-              <div className="comment_form_wrapper">
-                <h3 className="comment_form_title">Viết đánh giá</h3>
-                <form className="comment_form" onSubmit={handleSubmitComment}>
-                  <div className="comment_form_group">
-                    <label className="comment_form_label">Đánh giá:</label>
-                    <div className="comment_rating">
-                      {Array.from({ length: 5 }).map((_, i) => (
-                        <button
-                          key={i}
-                          type="button"
-                          className={`comment_rating_btn ${i < newComment.rating ? 'active' : ''}`}
-                          onClick={() => setNewComment({ ...newComment, rating: i + 1 })}
-                        >
-                          <FaStar />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="comment_form_group">
-                    <label className="comment_form_label">Nội dung đánh giá:</label>
-                    <textarea
-                      className="comment_form_textarea"
-                      value={newComment.content}
-                      onChange={(e) => setNewComment({ ...newComment, content: e.target.value })}
-                      placeholder="Chia sẻ cảm nhận của bạn về sản phẩm..."
-                      rows="4"
-                      required
-                    />
-                  </div>
-                  <button type="submit" className="comment_submit_btn">
-                    Gửi đánh giá
-                  </button>
-                </form>
-              </div>
-            ) : (
-              <div className="comment_form_wrapper" style={{ padding: '20px', textAlign: 'center' }}>
-                <p style={{ fontSize: '1.4rem', color: '#666', marginBottom: '15px' }}>
-                  Vui lòng đăng nhập để viết đánh giá
-                </p>
-                <button 
-                  onClick={() => navigate('/login')}
-                  style={{
-                    padding: '10px 20px',
-                    backgroundColor: '#1976d2',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '5px',
-                    cursor: 'pointer',
-                    fontSize: '1.4rem'
-                  }}
-                >
-                  Đăng nhập
-                </button>
-              </div>
-            )}
 
             {/* Comments List */}
             <div className="comments_list">

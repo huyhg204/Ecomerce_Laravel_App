@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { ClipLoader } from 'react-spinners'
-import { FaTrash, FaSearch, FaChevronLeft, FaChevronRight, FaStar, FaReply, FaEye, FaEyeSlash } from 'react-icons/fa'
+import { FaTrash, FaSearch, FaChevronLeft, FaChevronRight, FaStar, FaEye, FaEyeSlash } from 'react-icons/fa'
 import { toast } from 'sonner'
 import { axiosInstance } from '../../utils/axiosConfig'
 import { formatDateOnly } from '../../utils/dateHelper'
@@ -15,6 +15,7 @@ const AdminReviews = () => {
   const [replyingTo, setReplyingTo] = useState(null)
   const [replyText, setReplyText] = useState('')
   const [togglingStatus, setTogglingStatus] = useState(null)
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('')
   const [pagination, setPagination] = useState({
     current_page: 1,
     per_page: 20,
@@ -22,23 +23,21 @@ const AdminReviews = () => {
     last_page: 1
   })
   const itemsPerPage = 20
+  const [detailReview, setDetailReview] = useState(null)
+
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm)
+      setCurrentPage(1)
+    }, 350)
+
+    return () => clearTimeout(timeout)
+  }, [searchTerm])
 
   useEffect(() => {
     fetchReviews()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, ratingFilter, statusFilter, searchTerm])
-
-  // Load reply text khi mở modal
-  useEffect(() => {
-    if (replyingTo) {
-      const review = reviews.find(r => r.id === replyingTo)
-      if (review && review.admin_reply) {
-        setReplyText(review.admin_reply)
-      } else {
-        setReplyText('')
-      }
-    }
-  }, [replyingTo, reviews])
+  }, [currentPage, ratingFilter, statusFilter, debouncedSearchTerm])
 
   // Đảm bảo reviews luôn là mảng
   useEffect(() => {
@@ -59,8 +58,8 @@ const AdminReviews = () => {
         per_page: itemsPerPage
       }
       
-      if (searchTerm) {
-        params.search = searchTerm
+      if (debouncedSearchTerm) {
+        params.search = debouncedSearchTerm
       }
       
       if (ratingFilter) {
@@ -173,10 +172,24 @@ const AdminReviews = () => {
     return reviews
   }, [reviews])
 
-  // Reset to page 1 when search changes
+  // Load reply text khi mở modal
+  const replyingReview = useMemo(
+    () => safeReviews.find(r => r.id === replyingTo),
+    [replyingTo, safeReviews]
+  )
+
+  useEffect(() => {
+    if (replyingReview?.admin_reply) {
+      setReplyText(replyingReview.admin_reply)
+    } else {
+      setReplyText('')
+    }
+  }, [replyingReview])
+
+  // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1)
-  }, [searchTerm, ratingFilter, statusFilter])
+  }, [ratingFilter, statusFilter])
 
   // Pagination handlers
   const handlePageChange = (page) => {
@@ -349,21 +362,19 @@ const AdminReviews = () => {
         overflow: 'hidden'
       }}>
         <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <table style={{ width: '100%', minWidth: '960px', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
             <thead>
               <tr style={{
                 backgroundColor: '#f5f5f5',
                 borderBottom: '2px solid #e0e0e0'
               }}>
-                <th style={{ padding: '15px', textAlign: 'left', fontSize: '1.4rem', fontWeight: 'bold' }}>ID</th>
-                <th style={{ padding: '15px', textAlign: 'left', fontSize: '1.4rem', fontWeight: 'bold' }}>Người dùng</th>
-                <th style={{ padding: '15px', textAlign: 'left', fontSize: '1.4rem', fontWeight: 'bold' }}>Sản phẩm</th>
-                <th style={{ padding: '15px', textAlign: 'center', fontSize: '1.4rem', fontWeight: 'bold' }}>Đánh giá</th>
-                <th style={{ padding: '15px', textAlign: 'left', fontSize: '1.4rem', fontWeight: 'bold' }}>Nội dung</th>
-                <th style={{ padding: '15px', textAlign: 'left', fontSize: '1.4rem', fontWeight: 'bold' }}>Phản hồi Admin</th>
-                <th style={{ padding: '15px', textAlign: 'center', fontSize: '1.4rem', fontWeight: 'bold' }}>Trạng thái</th>
-                <th style={{ padding: '15px', textAlign: 'left', fontSize: '1.4rem', fontWeight: 'bold' }}>Ngày tạo</th>
-                <th style={{ padding: '15px', textAlign: 'center', fontSize: '1.4rem', fontWeight: 'bold' }}>Thao tác</th>
+                <th style={{ padding: '15px', textAlign: 'left', fontSize: '1.4rem', fontWeight: 'bold', whiteSpace: 'nowrap', width: '70px' }}>ID</th>
+                <th style={{ padding: '15px', textAlign: 'left', fontSize: '1.4rem', fontWeight: 'bold', whiteSpace: 'nowrap', width: '190px' }}>Người dùng</th>
+                <th style={{ padding: '15px', textAlign: 'left', fontSize: '1.4rem', fontWeight: 'bold', whiteSpace: 'nowrap', width: '240px' }}>Sản phẩm</th>
+                <th style={{ padding: '15px', textAlign: 'center', fontSize: '1.4rem', fontWeight: 'bold', whiteSpace: 'nowrap', width: '140px' }}>Đánh giá</th>
+                <th style={{ padding: '15px', textAlign: 'center', fontSize: '1.4rem', fontWeight: 'bold', whiteSpace: 'nowrap', width: '140px' }}>Trạng thái</th>
+                <th style={{ padding: '15px', textAlign: 'left', fontSize: '1.4rem', fontWeight: 'bold', whiteSpace: 'nowrap', width: '140px' }}>Ngày tạo</th>
+                <th style={{ padding: '15px', textAlign: 'center', fontSize: '1.4rem', fontWeight: 'bold', whiteSpace: 'nowrap', width: '210px' }}>Thao tác</th>
               </tr>
             </thead>
             <tbody>
@@ -414,82 +425,41 @@ const AdminReviews = () => {
                     <td style={{ padding: '15px', fontSize: '1.4rem' }}>{review.id}</td>
                     <td style={{ padding: '15px', fontSize: '1.4rem' }}>
                       <div>
-                        <div style={{ fontWeight: '500', marginBottom: '4px' }}>
+                        <div style={{ fontWeight: '600', marginBottom: '4px', wordBreak: 'break-word' }}>
                           {review.user_name || '-'}
                         </div>
-                        <div style={{ fontSize: '1.2rem', color: '#666' }}>
+                        <div style={{ fontSize: '1.2rem', color: '#666', wordBreak: 'break-word' }}>
                           {review.user_email || '-'}
                         </div>
                       </div>
                     </td>
                     <td style={{ padding: '15px', fontSize: '1.4rem' }}>
-                      <div style={{ maxWidth: '200px' }}>
-                        <div style={{ fontWeight: '500' }}>
-                          {review.product_name || '-'}
-                        </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                         {review.product_image && (
                           <img 
                             src={review.product_image} 
                             alt={review.product_name}
                             style={{
-                              width: '50px',
-                              height: '50px',
+                              width: '64px',
+                              height: '64px',
                               objectFit: 'cover',
-                              borderRadius: '5px',
-                              marginTop: '5px'
+                              borderRadius: '6px',
+                              flexShrink: 0
                             }}
                           />
                         )}
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontWeight: '600', wordBreak: 'break-word' }}>
+                            {review.product_name || '-'}
+                          </div>
+                          {review.product_id && (
+                            <div style={{ fontSize: '1.2rem', color: '#666' }}>ID: {review.product_id}</div>
+                          )}
+                        </div>
                       </div>
                     </td>
                     <td style={{ padding: '15px', textAlign: 'center' }}>
                       {renderStars(review.rating)}
-                    </td>
-                    <td style={{ padding: '15px', fontSize: '1.4rem', maxWidth: '300px' }}>
-                      <div style={{
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        display: '-webkit-box',
-                        WebkitLineClamp: 2,
-                        WebkitBoxOrient: 'vertical',
-                        color: review.content ? '#333' : '#999'
-                      }}>
-                        {review.content || '(Không có nội dung)'}
-                      </div>
-                    </td>
-                    <td style={{ padding: '15px', fontSize: '1.4rem', maxWidth: '300px' }}>
-                      {review.admin_reply ? (
-                        <div style={{
-                          backgroundColor: '#e3f2fd',
-                          padding: '10px',
-                          borderRadius: '8px',
-                          border: '1px solid #bbdefb'
-                        }}>
-                          <div style={{ 
-                            fontSize: '1.2rem', 
-                            fontWeight: '600', 
-                            color: '#1976d2',
-                            marginBottom: '5px'
-                          }}>
-                            Phản hồi từ Admin:
-                          </div>
-                          <div style={{ color: '#333' }}>
-                            {review.admin_reply}
-                          </div>
-                          {review.admin_replied_at && (
-                            <div style={{ 
-                              fontSize: '1.1rem', 
-                              color: '#666', 
-                              marginTop: '5px',
-                              fontStyle: 'italic'
-                            }}>
-                              {formatDateOnly(review.admin_replied_at)}
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <span style={{ color: '#999', fontStyle: 'italic' }}>Chưa có phản hồi</span>
-                      )}
                     </td>
                     <td style={{ padding: '15px', textAlign: 'center' }}>
                       <span style={{
@@ -508,6 +478,33 @@ const AdminReviews = () => {
                     </td>
                     <td style={{ padding: '15px', textAlign: 'center' }}>
                       <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                        <button
+                          onClick={() => setDetailReview(review)}
+                          style={{
+                            padding: '8px 14px',
+                            backgroundColor: '#6f42c1',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '8px',
+                            cursor: 'pointer',
+                            fontSize: '1.2rem',
+                            fontWeight: '600',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            transition: 'all 0.2s ease'
+                          }}
+                          onMouseEnter={(e) => {
+                            e.target.style.backgroundColor = '#59359c'
+                            e.target.style.transform = 'translateY(-1px)'
+                          }}
+                          onMouseLeave={(e) => {
+                            e.target.style.backgroundColor = '#6f42c1'
+                            e.target.style.transform = 'translateY(0)'
+                          }}
+                        >
+                          <FaEye /> Chi tiết
+                        </button>
                         <button
                           onClick={() => setReplyingTo(review.id)}
                           style={{
@@ -533,7 +530,7 @@ const AdminReviews = () => {
                             e.target.style.transform = 'translateY(0)'
                           }}
                         >
-                          <FaReply /> {review.admin_reply ? 'Sửa' : 'Trả lời'}
+                          Trả lời
                         </button>
                         <button
                           onClick={() => handleToggleStatus(review.id, review.status)}
@@ -739,6 +736,126 @@ const AdminReviews = () => {
         </div>
       )}
 
+      {/* Modal Chi tiết */}
+      {detailReview && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 2100,
+            padding: '20px'
+          }}
+          onClick={() => setDetailReview(null)}
+        >
+          <div
+            style={{
+              backgroundColor: '#fff',
+              borderRadius: '12px',
+              padding: '24px',
+              maxWidth: '640px',
+              width: '100%',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              boxShadow: '0 10px 30px rgba(0,0,0,0.15)'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 style={{ fontSize: '2rem', marginBottom: '16px', color: '#333' }}>Chi tiết đánh giá</h2>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
+              <div>
+                <div style={{ fontSize: '1.3rem', color: '#666' }}>Người dùng</div>
+                <div style={{ fontWeight: 600, fontSize: '1.4rem' }}>{detailReview.user_name || '-'}</div>
+                <div style={{ fontSize: '1.2rem', color: '#888' }}>{detailReview.user_email || '-'}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: '1.3rem', color: '#666' }}>Ngày tạo</div>
+                <div style={{ fontWeight: 600, fontSize: '1.4rem' }}>{formatDate(detailReview.created_at)}</div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
+              {detailReview.product_image && (
+                <img
+                  src={detailReview.product_image}
+                  alt={detailReview.product_name}
+                  style={{ width: 96, height: 96, objectFit: 'cover', borderRadius: '8px' }}
+                />
+              )}
+              <div>
+                <div style={{ fontSize: '1.3rem', color: '#666' }}>Sản phẩm</div>
+                <div style={{ fontWeight: 600, fontSize: '1.4rem' }}>{detailReview.product_name || '-'}</div>
+                {detailReview.product_id && (
+                  <div style={{ fontSize: '1.2rem', color: '#888' }}>ID: {detailReview.product_id}</div>
+                )}
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '12px' }}>
+              <div style={{ fontSize: '1.3rem', color: '#666', marginBottom: '4px' }}>Đánh giá</div>
+              {renderStars(detailReview.rating)}
+            </div>
+
+            <div style={{ marginBottom: '12px' }}>
+              <div style={{ fontSize: '1.3rem', color: '#666', marginBottom: '4px' }}>Nội dung</div>
+              <div style={{ fontSize: '1.4rem', color: '#333', whiteSpace: 'pre-wrap' }}>
+                {detailReview.content || '(Không có nội dung)'}
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '12px' }}>
+              <div style={{ fontSize: '1.3rem', color: '#666', marginBottom: '4px' }}>Phản hồi Admin</div>
+              {detailReview.admin_reply ? (
+                <div style={{ fontSize: '1.4rem', color: '#333', whiteSpace: 'pre-wrap' }}>
+                  {detailReview.admin_reply}
+                </div>
+              ) : (
+                <div style={{ fontSize: '1.3rem', color: '#999', fontStyle: 'italic' }}>Chưa có phản hồi</div>
+              )}
+            </div>
+
+            <div style={{ marginBottom: '12px' }}>
+              <div style={{ fontSize: '1.3rem', color: '#666', marginBottom: '4px' }}>Trạng thái</div>
+              <span style={{
+                padding: '6px 12px',
+                borderRadius: '6px',
+                fontSize: '1.2rem',
+                fontWeight: '600',
+                backgroundColor: detailReview.status === 1 ? '#d4edda' : '#f8d7da',
+                color: detailReview.status === 1 ? '#155724' : '#721c24'
+              }}>
+                {detailReview.status === 1 ? 'Hiển thị' : 'Đã ẩn'}
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '12px' }}>
+              <button
+                onClick={() => setDetailReview(null)}
+                style={{
+                  padding: '10px 18px',
+                  backgroundColor: '#6c757d',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontSize: '1.3rem',
+                  fontWeight: '600'
+                }}
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal Trả lời đánh giá */}
       {replyingTo && (
         <div
@@ -773,10 +890,10 @@ const AdminReviews = () => {
             onClick={(e) => e.stopPropagation()}
           >
             <h2 style={{ fontSize: '2rem', marginBottom: '20px', color: '#333' }}>
-              {reviews.find(r => r.id === replyingTo)?.admin_reply ? 'Sửa phản hồi' : 'Trả lời đánh giá'}
+              {replyingReview?.admin_reply ? 'Sửa phản hồi' : 'Trả lời đánh giá'}
             </h2>
             
-            {reviews.find(r => r.id === replyingTo) && (
+            {replyingReview && (
               <div style={{ 
                 backgroundColor: '#f8f9fa', 
                 padding: '15px', 
@@ -784,10 +901,10 @@ const AdminReviews = () => {
                 marginBottom: '20px'
               }}>
                 <div style={{ fontSize: '1.3rem', fontWeight: '600', marginBottom: '8px' }}>
-                  Đánh giá từ: {reviews.find(r => r.id === replyingTo).user_name}
+                  Đánh giá từ: {replyingReview.user_name}
                 </div>
                 <div style={{ fontSize: '1.4rem', color: '#333' }}>
-                  {reviews.find(r => r.id === replyingTo).content || '(Không có nội dung)'}
+                  {replyingReview.content || '(Không có nội dung)'}
                 </div>
               </div>
             )}
@@ -865,7 +982,7 @@ const AdminReviews = () => {
                   opacity: !replyText.trim() ? 0.6 : 1
                 }}
               >
-                {reviews.find(r => r.id === replyingTo)?.admin_reply ? 'Cập nhật' : 'Gửi phản hồi'}
+                {replyingReview?.admin_reply ? 'Cập nhật' : 'Gửi phản hồi'}
               </button>
             </div>
           </div>
