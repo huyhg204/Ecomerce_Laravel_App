@@ -51,10 +51,10 @@ class HomeController extends Controller
                 return DB::table('products')
                     ->join('order_details', 'products.id', '=', 'order_details.product_id')
                     ->join('orders', 'order_details.order_id', '=', 'orders.id')
-                    ->select('products.id', 'products.name_product', 'products.price_product', 'products.image_product', DB::raw('SUM(order_details.quantity_detail) as total_sold'))
+                    ->select('products.id', 'products.name_product', 'products.original_price', 'products.discount_price', 'products.discount_percent', 'products.image_product', DB::raw('SUM(order_details.quantity_detail) as total_sold'))
                     ->where('products.status_product', 0)
                     ->where('orders.status_order', 0)
-                    ->groupBy('products.id', 'products.name_product', 'products.price_product', 'products.image_product')
+                    ->groupBy('products.id', 'products.name_product', 'products.original_price', 'products.discount_price', 'products.discount_percent', 'products.image_product')
                     ->orderByDesc('total_sold')
                     ->limit(15)
                     ->get();
@@ -63,10 +63,10 @@ class HomeController extends Controller
             $topSellingProducts = DB::table('products')
                 ->join('order_details', 'products.id', '=', 'order_details.product_id')
                 ->join('orders', 'order_details.order_id', '=', 'orders.id')
-                ->select('products.id', 'products.name_product', 'products.price_product', 'products.image_product', DB::raw('SUM(order_details.quantity_detail) as total_sold'))
+                ->select('products.id', 'products.name_product', 'products.original_price', 'products.discount_price', 'products.discount_percent', 'products.image_product', DB::raw('SUM(order_details.quantity_detail) as total_sold'))
                 ->where('products.status_product', 0)
                 ->where('orders.status_order', 0)
-                ->groupBy('products.id', 'products.name_product', 'products.price_product', 'products.image_product')
+                ->groupBy('products.id', 'products.name_product', 'products.original_price', 'products.discount_price', 'products.discount_percent', 'products.image_product')
                 ->orderByDesc('total_sold')
                 ->limit(15)
                 ->get();
@@ -79,7 +79,9 @@ class HomeController extends Controller
             ->select(
                 'products.id as product_id',
                 'products.name_product',
-                'products.price_product',
+                'products.original_price',
+                'products.discount_price',
+                'products.discount_percent',
                 'products.image_product',
                 'products.category_id'
             )

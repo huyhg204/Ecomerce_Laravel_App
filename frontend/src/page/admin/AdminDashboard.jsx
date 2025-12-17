@@ -791,7 +791,7 @@ const AdminDashboard = () => {
                           fontWeight: '600',
                           color: '#1976d2'
                         }}>
-                          {formatCurrency(product.price_product || 0)}
+                          {formatCurrency(product.discount_price || product.original_price || 0)}
                         </td>
                         <td style={{ 
                           padding: '16px', 

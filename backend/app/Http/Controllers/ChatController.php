@@ -144,7 +144,8 @@ class ChatController extends Controller
         // Format thông tin sản phẩm để đưa vào prompt
         $productsText = "Danh sách sản phẩm:\n";
         foreach ($products as $index => $product) {
-            $price = number_format($product->price_product, 0, ',', '.') . '₫';
+            $actualPrice = $product->discount_price ?? $product->original_price;
+            $price = number_format($actualPrice, 0, ',', '.') . '₫';
             $productsText .= ($index + 1) . ". " . $product->name_product;
             if (isset($product->name_category)) {
                 $productsText .= " (Danh mục: " . $product->name_category . ")";

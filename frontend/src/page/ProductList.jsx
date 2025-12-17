@@ -99,7 +99,7 @@ const ProductList = () => {
       setAllProducts(activeProducts.map(product => ({
         id: product.id,
         title: product.name_product,
-        price_product: product.discount_price || product.price_product || 0,
+        price_product: product.discount_price || product.original_price || 0,
         original_price: product.original_price,
         discount_price: product.discount_price,
         discount_percent: product.discount_percent,
@@ -241,7 +241,7 @@ const ProductList = () => {
       setAllProducts(activeProducts.map(product => ({
         id: product.id,
         title: product.name_product,
-        price_product: product.discount_price || product.price_product || 0,
+        price_product: product.discount_price || product.original_price || 0,
         original_price: product.original_price,
         discount_price: product.discount_price,
         discount_percent: product.discount_percent,
@@ -668,10 +668,10 @@ const ProductList = () => {
                           <h3 className="card_title">{product.title}</h3>
                         </Link>
                         <div className="card_price_wrapper" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                          {product.original_price && product.original_price > (product.discount_price || product.price_product) ? (
+                          {product.original_price && product.discount_price && product.original_price > product.discount_price ? (
                             <>
                               <p className="card_price" style={{ color: '#dc3545', margin: 0, fontWeight: 'bold' }}>
-                                {formatCurrency(product.discount_price || product.price_product)}
+                                {formatCurrency(product.discount_price || product.original_price)}
                               </p>
                               <p style={{ 
                                 fontSize: '1.2rem', 
@@ -683,7 +683,7 @@ const ProductList = () => {
                               </p>
                             </>
                           ) : (
-                            <p className="card_price" style={{ margin: 0 }}>{formatCurrency(product.price_product)}</p>
+                            <p className="card_price" style={{ margin: 0 }}>{formatCurrency(product.discount_price || product.original_price)}</p>
                           )}
                         </div>
                         <div className="card_ratings">

@@ -42,8 +42,6 @@ const Carts = () => {
       // Lấy thông tin sản phẩm
       const productResponse = await axiosInstance.get(`/product/${productId}`)
       if (productResponse.data.status === 'success') {
-        const productData = productResponse.data.data.product || productResponse.data.data
-        
         // Nếu có product_attribute_id, lấy quantity từ attribute
         if (productAttributeId) {
           const attributes = productResponse.data.data.attributes || []
@@ -54,7 +52,7 @@ const Carts = () => {
         }
         
         // Nếu không có attribute, lấy từ product
-        return productData.quantity_product || 0
+        return 0 // Stock managed by product_attributes
       }
       return 0
     } catch (error) {
@@ -175,13 +173,13 @@ const Carts = () => {
 
   // Tính tổng giá giảm (tạm tính)
   const subtotal = cartItems.reduce((sum, item) => {
-    const discountPrice = item.discount_price || item.price_product
+    const discountPrice = item.discount_price || item.original_price
     return sum + (discountPrice * item.quantity_item)
   }, 0)
   
   // Tính tổng giá gốc
   const totalOriginal = cartItems.reduce((sum, item) => {
-    const originalPrice = item.original_price || item.price_product
+    const originalPrice = item.original_price || item.discount_price
     return sum + (originalPrice * item.quantity_item)
   }, 0)
   
@@ -300,8 +298,8 @@ const Carts = () => {
                       const productId = item.product_id
                       const productName = item.name_product
                       const productImage = item.image_product
-                      const discountPrice = item.discount_price || item.price_product
-                      const originalPrice = item.original_price || item.price_product
+                      const discountPrice = item.discount_price || item.original_price
+                      const originalPrice = item.original_price || item.discount_price
                       const quantity = item.quantity_item
                       const size = item.size
                       const productAttributeId = item.product_attribute_id

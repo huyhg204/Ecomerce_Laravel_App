@@ -22,7 +22,6 @@ const AdminProducts = () => {
     original_price: '',
     discount_percent: '',
     category_id: '',
-    stock: '',
     image: ''
   })
   const [attributes, setAttributes] = useState([]) // [{ type: 'Size', value: 'S', quantity: 10 }, ...]
@@ -178,20 +177,12 @@ const AdminProducts = () => {
         
         const data = {
           name_product: nameProduct,
-          price_product: priceProduct,
           category_id: categoryId,
         }
         
         // Thêm các field optional nếu có giá trị
         if (formData.description && formData.description.trim() !== '') {
           data.description_product = formData.description.trim()
-        }
-        
-        if (formData.stock && formData.stock !== '') {
-          const stock = parseInt(formData.stock)
-          if (!isNaN(stock) && stock >= 0) {
-            data.quantity_product = stock
-          }
         }
         
         // Tính giá: nhập giá gốc và % giảm, backend sẽ tự tính giá giảm
@@ -205,19 +196,15 @@ const AdminProducts = () => {
               const discountPercent = parseFloat(formData.discount_percent)
               if (!isNaN(discountPercent) && discountPercent >= 0 && discountPercent <= 100) {
                 data.discount_percent = Math.round(discountPercent)
-                // Tính giá sau giảm để cập nhật price_product (giá bán hiện tại)
-                // Ép kiểu về số nguyên trước khi tính để tránh floating point error
+                // Tính giá sau giảm
                 const originalPriceInt = Math.round(parseFloat(originalPrice))
                 const discountPercentInt = Math.round(parseFloat(discountPercent))
-                // Sử dụng công thức: (giá_gốc * (100 - %giảm)) / 100 để tránh floating point error
-                // Ví dụ: (1000000 * 90) / 100 = 900000
                 const discountPrice = (originalPriceInt * (100 - discountPercentInt)) / 100
-                // Đảm bảo giá là số nguyên (không có số thập phân) - làm tròn để xử lý trường hợp có số lẻ
-                data.price_product = Math.round(discountPrice)
+                data.discount_price = Math.round(discountPrice)
               }
             } else {
               // Nếu không có % giảm, giá bán = giá gốc
-              data.price_product = originalPrice
+              data.discount_price = originalPrice
             }
           }
         }
@@ -237,13 +224,12 @@ const AdminProducts = () => {
           const formDataToSend = new FormData()
           // Gửi tất cả dữ liệu dưới dạng FormData khi có file
           formDataToSend.append('name_product', updateData.name_product)
-          formDataToSend.append('price_product', updateData.price_product.toString())
+          if (updateData.discount_price) {
+            formDataToSend.append('discount_price', updateData.discount_price.toString())
+          }
           formDataToSend.append('category_id', updateData.category_id.toString())
           if (updateData.description_product) {
             formDataToSend.append('description_product', updateData.description_product)
-          }
-          if (updateData.quantity_product !== undefined) {
-            formDataToSend.append('quantity_product', updateData.quantity_product.toString())
           }
           if (updateData.original_price) {
             formDataToSend.append('original_price', updateData.original_price.toString())
@@ -287,13 +273,12 @@ const AdminProducts = () => {
           const formDataToSend = new FormData()
           // Gửi tất cả dữ liệu dưới dạng FormData khi có file
           formDataToSend.append('name_product', createData.name_product)
-          formDataToSend.append('price_product', createData.price_product.toString())
+          if (createData.discount_price) {
+            formDataToSend.append('discount_price', createData.discount_price.toString())
+          }
           formDataToSend.append('category_id', createData.category_id.toString())
           if (createData.description_product) {
             formDataToSend.append('description_product', createData.description_product)
-          }
-          if (createData.quantity_product !== undefined) {
-            formDataToSend.append('quantity_product', createData.quantity_product.toString())
           }
           if (createData.original_price) {
             formDataToSend.append('original_price', createData.original_price.toString())
@@ -361,7 +346,7 @@ const AdminProducts = () => {
             // Map tên field sang tiếng Việt
             const fieldNames = {
               'name_product': 'Tên sản phẩm',
-              'price_product': 'Giá sản phẩm',
+              'discount_price': 'Giá sản phẩm',
               'category_id': 'Danh mục',
               'description_product': 'Mô tả',
               'quantity_product': 'Số lượng',
@@ -409,11 +394,10 @@ const AdminProducts = () => {
     setFormData({
           name: productData.name_product || '',
           description: productData.description_product || '',
-          price: productData.discount_price || productData.price_product || '',
+          price: productData.discount_price || productData.original_price || '',
           original_price: productData.original_price || '',
       discount_percent: discountPercent,
           category_id: productData.category_id || '',
-          stock: productData.quantity_product || '',
       image: '' // Không set image URL, chỉ hiển thị preview ở form
     })
     
@@ -439,11 +423,10 @@ const AdminProducts = () => {
         setFormData({
           name: product.name_product || '',
           description: product.description_product || '',
-          price: product.discount_price || product.price_product || '',
+          price: product.discount_price || product.original_price || '',
           original_price: product.original_price || '',
           discount_percent: discountPercent,
           category_id: product.category_id || '',
-          stock: product.quantity_product || '',
           image: ''
         })
         setAttributes([])
@@ -459,11 +442,10 @@ const AdminProducts = () => {
       setFormData({
         name: product.name_product || '',
         description: product.description_product || '',
-        price: product.discount_price || product.price_product || '',
+        price: product.discount_price || product.original_price || '',
         original_price: product.original_price || '',
         discount_percent: discountPercent,
         category_id: product.category_id || '',
-        stock: product.quantity_product || '',
         image: ''
       })
       setAttributes([])
@@ -964,7 +946,7 @@ const AdminProducts = () => {
                       fontWeight: '600',
                       color: '#1976d2'
                     }}>
-                      {formatCurrency(product.discount_price || product.price_product)}
+                      {formatCurrency(product.discount_price || product.original_price)}
                     </td>
                     <td style={{ 
                       padding: '16px', 
@@ -1592,42 +1574,6 @@ const AdminProducts = () => {
                     disabled={true}
                   />
                 </div>
-                <div>
-                  <label style={{ 
-                    display: 'block', 
-                    marginBottom: '8px', 
-                    fontSize: '1.4rem', 
-                    fontWeight: '600',
-                    color: '#495057'
-                  }}>
-                    Tồn kho *
-                  </label>
-                  <input
-                    type="number"
-                    name="stock"
-                    value={formData.stock}
-                    onChange={handleInputChange}
-                    required
-                    min="0"
-                    style={{
-                      width: '100%',
-                      padding: '12px 16px',
-                      fontSize: '1.4rem',
-                      border: '2px solid #e9ecef',
-                      borderRadius: '10px',
-                      outline: 'none',
-                      transition: 'all 0.3s ease'
-                    }}
-                    onFocus={(e) => {
-                      e.target.style.borderColor = '#1976d2'
-                      e.target.style.boxShadow = '0 0 0 3px rgba(25, 118, 210, 0.1)'
-                    }}
-                    onBlur={(e) => {
-                      e.target.style.borderColor = '#e9ecef'
-                      e.target.style.boxShadow = 'none'
-                    }}
-                  />
-                </div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
                 <div>
@@ -2052,7 +1998,6 @@ const AdminProducts = () => {
                       description: '',
                       price: '',
                       category_id: '',
-                      stock: '',
                       image: ''
                     })
                     // Reset file input

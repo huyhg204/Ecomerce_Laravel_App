@@ -26,18 +26,15 @@ class CartController extends Controller
                         'carts.product_id', 'carts.quantity_item', 'carts.total_item',
                         'carts.product_attribute_id', 'carts.size',
                         'products.image_product', 'products.name_product', 
-                        'products.price_product', 'products.original_price', 
-                        'products.discount_price', 'products.discount_percent'
+                        'products.original_price', 'products.discount_price', 'products.discount_percent'
                     )
                     ->get();
                 $cart = [];
                 foreach ($cartFromDb as $item) {
-                    // Tính giá thực tế (ưu tiên discount_price, nếu không có thì dùng price_product)
-                    $actualPrice = $item->discount_price ?? $item->price_product;
-                    $originalPrice = $item->original_price ?? $item->price_product;
+                    $actualPrice = $item->discount_price ?? $item->original_price;
+                    $originalPrice = $item->original_price;
                     $totalItem = $item->quantity_item * $actualPrice;
                     
-                    // Key kết hợp product_id và size để phân biệt các item cùng sản phẩm nhưng khác size
                     $cartKey = $item->product_id . ($item->size ? '_' . $item->size : '');
                     
                     $cart[$cartKey] = [
@@ -46,13 +43,13 @@ class CartController extends Controller
                         'size' => $item->size,
                         'image_product' => $item->image_product,
                         'name_product'  => $item->name_product,
-                        'price_product' => $actualPrice,
+                        'price' => $actualPrice,
                         'original_price' => $originalPrice,
                         'discount_price' => $item->discount_price,
                         'discount_percent' => $item->discount_percent,
                         'quantity_item' => $item->quantity_item,
                         'total_item'    => $totalItem,
-                        'total_original' => $item->quantity_item * $originalPrice, // Tổng giá gốc
+                        'total_original' => $item->quantity_item * $originalPrice,
                     ];
                 }
                 session()->put('cart', $cart);
@@ -69,7 +66,7 @@ class CartController extends Controller
         // Tính tổng giá gốc
         $totalOriginal = 0;
         foreach ($cart as $item) {
-            $originalPrice = $item['original_price'] ?? $item['price_product'];
+            $originalPrice = $item['original_price'] ?? $item['price'];
             $totalOriginal += $originalPrice * $item['quantity_item'];
         }
         
@@ -103,8 +100,8 @@ class CartController extends Controller
         $updateMode = $request->input('update_mode', false); // Nếu true, sẽ set quantity mới thay vì cộng thêm
 
         $product = DB::table('products')
-            ->select('id', 'image_product', 'name_product', 'price_product', 
-                    'original_price', 'discount_price', 'discount_percent', 'quantity_product')
+            ->select('id', 'image_product', 'name_product', 
+                    'original_price', 'discount_price', 'discount_percent')
             ->where('id', $productId)
             ->first();
 
@@ -117,8 +114,8 @@ class CartController extends Controller
         $size = $request->input('size');
         $productAttributeId = $request->input('product_attribute_id');
         
-        // Nếu có size, kiểm tra tồn kho của size đó
-        $availableQuantity = $product->quantity_product;
+        // Kiểm tra tồn kho từ product_attributes
+        $availableQuantity = 0;
         if ($productAttributeId) {
             $attribute = DB::table('product_attributes')
                 ->where('id', $productAttributeId)
@@ -127,6 +124,11 @@ class CartController extends Controller
             if ($attribute) {
                 $availableQuantity = $attribute->quantity;
             }
+        } else {
+            // Tính tổng quantity từ tất cả sizes
+            $availableQuantity = DB::table('product_attributes')
+                ->where('product_id', $productId)
+                ->sum('quantity');
         }
 
         $userId = Auth::id();
@@ -164,8 +166,8 @@ class CartController extends Controller
         }
 
         // Tính giá thực tế (ưu tiên discount_price)
-        $actualPrice = $product->discount_price ?? $product->price_product;
-        $originalPrice = $product->original_price ?? $product->price_product;
+        $actualPrice = $product->discount_price ?? $product->original_price;
+        $originalPrice = $product->original_price;
         $totalItem = $newTotalQuantity * $actualPrice;
         $totalOriginal = $newTotalQuantity * $originalPrice;
 
@@ -206,7 +208,7 @@ class CartController extends Controller
             'size' => $size,
             'image_product' => $product->image_product,
             'name_product'  => $product->name_product,
-            'price_product' => $actualPrice,
+            'price' => $actualPrice,
             'original_price' => $originalPrice,
             'discount_price' => $product->discount_price,
             'discount_percent' => $product->discount_percent,

@@ -113,15 +113,14 @@ class OrderController extends Controller
                     'carts.product_id', 'carts.quantity_item', 'carts.total_item',
                     'carts.product_attribute_id', 'carts.size',
                     'products.image_product', 'products.name_product', 
-                    'products.price_product', 'products.original_price',
-                    'products.discount_price', 'products.discount_percent'
+                    'products.original_price', 'products.discount_price', 'products.discount_percent'
                 )
                 ->get();
             
             $cart = [];
             foreach ($cartFromDb as $item) {
-                $actualPrice = $item->discount_price ?? $item->price_product;
-                $originalPrice = $item->original_price ?? $item->price_product;
+                $actualPrice = $item->discount_price ?? $item->original_price;
+                $originalPrice = $item->original_price;
                 $cartKey = $item->product_id . ($item->size ? '_' . $item->size : '');
                 
                 $cart[$cartKey] = [
@@ -130,7 +129,7 @@ class OrderController extends Controller
                     'size' => $item->size,
                     'image_product' => $item->image_product,
                     'name_product'  => $item->name_product,
-                    'price_product' => $actualPrice,
+                    'price' => $actualPrice,
                     'original_price' => $originalPrice,
                     'discount_price' => $item->discount_price,
                     'discount_percent' => $item->discount_percent,
@@ -200,11 +199,24 @@ class OrderController extends Controller
         try {
             DB::beginTransaction();
 
-            // Check tồn kho lần cuối
+            // Check tồn kho lần cuối từ product_attributes
             foreach ($cart as $item) {
                 $product = DB::table('products')->where('id', $item['product_id'])->lockForUpdate()->first();
-                if (!$product || $product->quantity_product < $item['quantity_item']) {
-                    throw new \Exception('Sản phẩm ' . ($product->name_product ?? 'ID '.$item['product_id']) . ' không đủ hàng.');
+                if (!$product) {
+                    throw new \Exception('Sản phẩm ID '.$item['product_id'].' không tồn tại.');
+                }
+                
+                // Kiểm tra tồn kho từ product_attributes
+                if (!empty($item['product_attribute_id'])) {
+                    $attr = DB::table('product_attributes')->where('id', $item['product_attribute_id'])->lockForUpdate()->first();
+                    if (!$attr || $attr->quantity < $item['quantity_item']) {
+                        throw new \Exception('Sản phẩm ' . $product->name_product . ' size ' . ($item['size'] ?? '') . ' không đủ hàng.');
+                    }
+                } else {
+                    $totalStock = DB::table('product_attributes')->where('product_id', $item['product_id'])->sum('quantity');
+                    if ($totalStock < $item['quantity_item']) {
+                        throw new \Exception('Sản phẩm ' . $product->name_product . ' không đủ hàng.');
+                    }
                 }
             }
 
@@ -245,10 +257,7 @@ class OrderController extends Controller
                     'total_detail' => $item['total_item'],
                 ]);
 
-                // Giảm số lượng trong products
-                DB::table('products')->where('id', $item['product_id'])->decrement('quantity_product', $item['quantity_item']);
-                
-                // Giảm số lượng trong product_attributes nếu có
+                // Giảm số lượng trong product_attributes
                 if (!empty($item['product_attribute_id'])) {
                     DB::table('product_attributes')
                         ->where('id', $item['product_attribute_id'])
@@ -1149,15 +1158,14 @@ class OrderController extends Controller
                     'carts.product_id', 'carts.quantity_item', 'carts.total_item',
                     'carts.product_attribute_id', 'carts.size',
                     'products.image_product', 'products.name_product', 
-                    'products.price_product', 'products.original_price',
-                    'products.discount_price', 'products.discount_percent'
+                    'products.original_price', 'products.discount_price', 'products.discount_percent'
                 )
                 ->get();
             
             $cart = [];
             foreach ($cartFromDb as $item) {
-                $actualPrice = $item->discount_price ?? $item->price_product;
-                $originalPrice = $item->original_price ?? $item->price_product;
+                $actualPrice = $item->discount_price ?? $item->original_price;
+                $originalPrice = $item->original_price;
                 $cartKey = $item->product_id . ($item->size ? '_' . $item->size : '');
                 
                 $cart[$cartKey] = [
@@ -1166,7 +1174,7 @@ class OrderController extends Controller
                     'size' => $item->size,
                     'image_product' => $item->image_product,
                     'name_product'  => $item->name_product,
-                    'price_product' => $actualPrice,
+                    'price' => $actualPrice,
                     'original_price' => $originalPrice,
                     'discount_price' => $item->discount_price,
                     'discount_percent' => $item->discount_percent,
@@ -1610,13 +1618,22 @@ class OrderController extends Controller
 
             DB::beginTransaction();
 
-            // Check tồn kho trước khi ghi đơn
+            // Check tồn kho trước khi ghi đơn từ product_attributes
             foreach ($cart as $item) {
                 $product = DB::table('products')->where('id', $item['product_id'])->lockForUpdate()->first();
-                if (!$product || $product->quantity_product < $item['quantity_item']) {
+                if (!$product) {
                     DB::rollBack();
                     $frontendUrl = env('FRONTEND_URL', 'http://localhost:3000');
-                    return redirect($frontendUrl . '/checkout?error=' . urlencode('Sản phẩm ' . ($product->name_product ?? 'ID '.$item['product_id']) . ' không đủ hàng.'));
+                    return redirect($frontendUrl . '/checkout?error=' . urlencode('Sản phẩm ID '.$item['product_id'].' không tồn tại.'));
+                }
+                
+                if (!empty($item['product_attribute_id'])) {
+                    $attr = DB::table('product_attributes')->where('id', $item['product_attribute_id'])->lockForUpdate()->first();
+                    if (!$attr || $attr->quantity < $item['quantity_item']) {
+                        DB::rollBack();
+                        $frontendUrl = env('FRONTEND_URL', 'http://localhost:3000');
+                        return redirect($frontendUrl . '/checkout?error=' . urlencode('Sản phẩm ' . $product->name_product . ' size ' . ($item['size'] ?? '') . ' không đủ hàng.'));
+                    }
                 }
             }
 
@@ -1649,8 +1666,7 @@ class OrderController extends Controller
                     'total_detail' => $item['total_item'],
                 ]);
 
-                // Giảm tồn kho
-                DB::table('products')->where('id', $item['product_id'])->decrement('quantity_product', $item['quantity_item']);
+                // Giảm tồn kho từ product_attributes
                 if (!empty($item['product_attribute_id'])) {
                     DB::table('product_attributes')
                         ->where('id', $item['product_attribute_id'])

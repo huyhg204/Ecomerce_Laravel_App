@@ -27,8 +27,9 @@ class WishlistController extends Controller
                     'wishlists.created_at',
                     'products.name_product',
                     'products.image_product',
-                    'products.price_product',
-                    'products.quantity_product',
+                    'products.original_price',
+                    'products.discount_price',
+                    'products.discount_percent',
                     'products.description_product'
                 )
                 ->orderBy('wishlists.created_at', 'desc')

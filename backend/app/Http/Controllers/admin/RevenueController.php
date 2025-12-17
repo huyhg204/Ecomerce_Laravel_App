@@ -76,13 +76,13 @@ class RevenueController extends Controller
                     'order_details.product_id',
                     'products.name_product',
                     'products.image_product',
-                    'products.price_product',
+                    'products.original_price',
+                    'products.discount_price',
                     DB::raw('SUM(order_details.quantity_detail) as quantity_sold'),
                     DB::raw('SUM(order_details.total_detail) as total_revenue')
                 )
-                ->where('products.status_product', 0); // Chỉ tính sản phẩm đang hiển thị
+                ->where('products.status_product', 0);
             
-            // Áp dụng filter thời gian
             if ($timePeriod == 'day') {
                 $query->whereDate('orders.date_order', $date);
             } elseif ($timePeriod == 'month') {
@@ -101,7 +101,8 @@ class RevenueController extends Controller
                     'order_details.product_id',
                     'products.name_product',
                     'products.image_product',
-                    'products.price_product'
+                    'products.original_price',
+                    'products.discount_price'
                 )
                 ->orderByDesc('quantity_sold')
                 ->take(10)

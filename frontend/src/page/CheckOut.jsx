@@ -338,16 +338,16 @@ const CheckOut = () => {
   }
 
   // Tính toán tổng tiền
-  const { subtotal, totalOriginal, savings, finalTotal } = useMemo(() => {
+  const { subtotal, savings, finalTotal } = useMemo(() => {
     // Tạm tính = tổng giá giảm
     const sub = orderItems.reduce((sum, item) => {
-      const discountPrice = item.discount_price || item.price_product
+      const discountPrice = item.discount_price || item.original_price
       return sum + (discountPrice * item.quantity_item)
     }, 0)
     
     // Tổng giá gốc
     const orig = orderItems.reduce((sum, item) => {
-      const originalPrice = item.original_price || item.price_product
+      const originalPrice = item.original_price || item.discount_price
       return sum + (originalPrice * item.quantity_item)
     }, 0)
     
@@ -367,8 +367,8 @@ const CheckOut = () => {
 
   // Helper function để lấy thông tin sản phẩm từ item
   const getProductInfo = (item) => {
-    const discountPrice = item.discount_price || item.price_product
-    const originalPrice = item.original_price || item.price_product
+    const discountPrice = item.discount_price || item.original_price
+    const originalPrice = item.original_price || item.discount_price
     return {
       id: item.product_id,
       name: item.name_product,

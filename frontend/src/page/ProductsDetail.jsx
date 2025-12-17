@@ -77,14 +77,14 @@ const ProductsDetail = () => {
         setProduct({
           id: productData.id,
           name: productData.name_product,
-          price: productData.discount_price || productData.price_product || 0,
+          price: productData.discount_price || productData.original_price || 0,
           originalPrice: productData.original_price,
           discountPrice: productData.discount_price,
           discountPercent: productData.discount_percent,
           description: productData.description_product || '',
           image: productData.image_product || '',
           images: productData.images || [productData.image_product],
-          stock: productData.quantity_product || 0,
+          stock: 0, // Stock is managed by product_attributes
           category: productData.name_category || productData.category,
         })
         // Set first image as default
@@ -112,7 +112,7 @@ const ProductsDetail = () => {
           .map(p => ({
             id: p.id,
             title: p.name_product,
-            price: p.price_product || 0,
+            price: p.discount_price || p.original_price || 0,
             image: p.image_product || '',
             reviews: p.reviews_count || 0,
           }))

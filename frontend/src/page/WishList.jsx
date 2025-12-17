@@ -33,9 +33,9 @@ const WishList = () => {
           id: item.id,
           product_id: item.product_id,
           title: item.name_product,
-          price: item.price_product || 0,
+          price: item.discount_price || item.original_price || 0,
           image: item.image_product || '',
-          stock: item.quantity_product || 0,
+          stock: 0, // Stock managed by product_attributes
           description: item.description_product || '',
         }))
         setWishlistItems(items)
@@ -64,7 +64,7 @@ const WishList = () => {
         setJustForYouProducts(productsList.slice(0, 4).map(product => ({
           id: product.id,
           title: product.name_product,
-          price: product.price_product || 0,
+          price: product.discount_price || product.original_price || 0,
           image: product.image_product || '',
           rating: product.rating || 4.0,
           reviews: product.reviews_count || 0,
@@ -177,7 +177,7 @@ const WishList = () => {
                       <h3 className="card_title">{product.title || product.name_product}</h3>
                     </Link>
                     <div className="card_price_wrapper">
-                      <p className="card_price">{formatCurrency(product.price || product.price_product || 0)}</p>
+                      <p className="card_price">{formatCurrency(product.price || 0)}</p>
                       {product.originalPrice && (
                         <p className="card_price_original">
                           {formatCurrency(product.originalPrice)}
